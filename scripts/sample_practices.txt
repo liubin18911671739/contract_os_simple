@@ -1,0 +1,44 @@
+# Contract Review Best Practices
+
+## Risk Assessment Framework
+
+When reviewing contracts, assess risks in three categories:
+
+### HIGH Risk Items
+- Unlimited liability clauses
+- Unfair termination provisions
+- Automatic renewal without notice
+- Unclear payment terms
+- Missing dispute resolution
+
+### MEDIUM Risk Items
+- Long notice periods
+- Restrictive confidentiality terms
+- One-sided indemnification
+- Vague deliverables
+
+### LOW Risk Items
+- Minor administrative provisions
+- Standard boilerplate language
+- Non-material terms
+
+## Review Checklist
+
+Before signing, ensure:
+1. All parties are correctly identified
+2. Scope of work is clearly defined
+3. Payment terms are complete and clear
+4. Liability is appropriately limited
+5. Termination rights are balanced
+6. Confidentiality obligations are reasonable
+7. Dispute resolution is specified
+8. Governing law is appropriate
+
+## Red Flags
+
+Watch out for:
+- "Time is of the essence" without justification
+- Blank spaces for future terms
+- References to undefined documents
+- Unilateral modification rights
+- Waivers of legal rights

@@ -1,0 +1,46 @@
+# Contract Risk Regulations
+
+## 1. Liability Limitations
+
+Contracts should always include liability limitations. Unlimited liability clauses pose significant risks to both parties.
+
+### Key Points:
+- Liability should be capped at contract value or a multiple thereof
+- Consequential damages should be excluded
+- No liability for indirect or punitive damages
+
+## 2. Termination Rights
+
+Fair termination provisions are essential for contract flexibility.
+
+### Best Practices:
+- Allow termination for cause with notice period
+- Include termination for convenience with reasonable fees
+- Define cure periods for breaches
+
+## 3. Payment Terms
+
+Clear payment terms prevent disputes and cash flow issues.
+
+### Recommendations:
+- Specify payment due dates clearly
+- Include late payment penalties
+- Define payment methods and currency
+
+## 4. Confidentiality
+
+Protect sensitive information with proper confidentiality clauses.
+
+### Required Elements:
+- Define what constitutes confidential information
+- Specify permitted uses and disclosure
+- Set duration of confidentiality obligations
+
+## 5. Dispute Resolution
+
+Efficient dispute resolution saves time and costs.
+
+### Options to Consider:
+- Mediation as first step
+- Arbitration clauses with specified rules
+- Governing law and jurisdiction

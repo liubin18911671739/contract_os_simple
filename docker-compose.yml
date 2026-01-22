@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  contract-os-simple:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: contract-os-simple
+    ports:
+      - "8000:8000"
+    environment:
+      # ZhipuAI Configuration
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
+      - ZHIPU_CHAT_MODEL=glm-4-flash
+      - ZHIPU_EMBED_MODEL=embedding-3
+      - ZHIPU_RERANK_MODEL=rerank-2
+
+      # Database
+      - DATABASE_PATH=/app/data/database.db
+
+      # Storage
+      - STORAGE_ROOT=/app/storage
+
+      # Server
+      - HOST=0.0.0.0
+      - PORT=8000
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+
+      # Concurrency
+      - MAX_CONCURRENT_TASKS=3
+      - MAX_API_CONCURRENT=5
+
+      # Rate Limiting
+      - ENABLE_RATE_LIMIT=true
+      - RATE_LIMIT_PER_HOUR=200
+
+    volumes:
+      # Persist database
+      - ./data:/app/data
+      # Persist storage
+      - ./storage:/app/storage
+      # Config
+      - ./.env:/app/.env:ro
+
+    restart: unless-stopped
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  data:
+  storage:
