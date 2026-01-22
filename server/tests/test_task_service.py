@@ -2,6 +2,7 @@
 Tests for Task Service
 """
 import pytest
+import uuid
 from sqlalchemy import select
 
 from server.database.models import PrecheckTask, TaskEvent, ConfigSnapshot
@@ -30,8 +31,10 @@ async def test_create_task(test_db):
     version = ContractVersion(
         id=version_id,
         contract_id=contract_id,
-        version_number=1,
-        file_path="test.pdf",
+        version_no=1,
+        object_key="test.pdf",
+        sha256="abc123",
+        mime="application/pdf",
     )
     test_db.add(version)
     await test_db.commit()
@@ -76,8 +79,10 @@ async def test_get_task(test_db):
     version = ContractVersion(
         id=version_id,
         contract_id=contract_id,
-        version_number=1,
-        file_path="test.pdf",
+        version_no=1,
+        object_key="test.pdf",
+        sha256="abc123",
+        mime="application/pdf",
     )
     test_db.add(version)
 
@@ -136,8 +141,10 @@ async def test_update_task_progress(test_db):
     version = ContractVersion(
         id=version_id,
         contract_id=contract_id,
-        version_number=1,
-        file_path="test.pdf",
+        version_no=1,
+        object_key="test.pdf",
+        sha256="abc123",
+        mime="application/pdf",
     )
     test_db.add(version)
 
@@ -230,8 +237,10 @@ async def test_list_tasks(test_db):
     version = ContractVersion(
         id=version_id,
         contract_id=contract_id,
-        version_number=1,
-        file_path="test.pdf",
+        version_no=1,
+        object_key="test.pdf",
+        sha256="abc123",
+        mime="application/pdf",
     )
     test_db.add(version)
 

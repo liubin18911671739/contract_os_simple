@@ -10,8 +10,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-# Add server to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Set test environment variables BEFORE importing server modules
+os.environ.setdefault("ZHIPU_API_KEY", "test_key_for_unit_tests")
+os.environ.setdefault("DATABASE_PATH", "/tmp/test_db.db")
+os.environ.setdefault("STORAGE_ROOT", "/tmp/test_storage")
+
+# Add project root to Python path
+# This allows importing from server package when running pytest from project root
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from server.database.models import Base
 from server.config import Settings

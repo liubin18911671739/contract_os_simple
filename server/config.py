@@ -1,9 +1,9 @@
 """
 Configuration management for Contract OS Simple
 """
-from os import getenv
+import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pydantic_settings import BaseSettings
 
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Application settings"""
 
     # ZhipuAI
-    zhipu_api_key: str
+    zhipu_api_key: Optional[str] = None  # Make optional for testing
     zhipu_chat_model: str = "glm-4-flash"
     zhipu_embed_model: str = "embedding-3"
     zhipu_rerank_model: str = "rerank-2"

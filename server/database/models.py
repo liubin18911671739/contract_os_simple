@@ -311,8 +311,8 @@ class RuleHit(Base):
     __tablename__ = "rule_hits"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    risk_id: Mapped[str] = mapped_column(
-        String, ForeignKey("risks.id", ondelete="CASCADE"), nullable=False
+    risk_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("risks.id", ondelete="CASCADE"), nullable=True
     )
     rule_id: Mapped[str] = mapped_column(String, nullable=False)
     rule_name: Mapped[str] = mapped_column(String, nullable=False)
