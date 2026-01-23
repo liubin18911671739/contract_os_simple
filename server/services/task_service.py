@@ -4,7 +4,7 @@ Manages precheck task lifecycle
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, func, select, update
@@ -253,7 +253,7 @@ class TaskService:
                 task.status = status
             if error_message:
                 task.error_message = error_message
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
 
     async def log_event(
@@ -424,3 +424,91 @@ class TaskService:
             }
             for row in rows
         ]
+
+    async def delete_task(self, task_id: str) -> bool:
+        """
+        Delete a task and all its related data
+
+        Args:
+            task_id: Task ID to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        from sqlalchemy import delete as sql_delete
+
+        # Check if task exists
+        task = await self.session.get(PrecheckTask, task_id)
+        if not task:
+            return False
+
+        # Check if task is running
+        if task.status in ("QUEUED", "PROCESSING"):
+            raise ValueError("Cannot delete a running task. Cancel it first.")
+
+        # Delete in order of dependencies (child records first)
+        # 1. Delete KB citations
+        await self.session.execute(
+            sql_delete(TaskKBSnapshot).where(TaskKBSnapshot.task_id == task_id)
+        )
+
+        # 2. Delete rule hits (cascade should handle this, but being explicit)
+        from ..database.models import RuleHit
+
+        await self.session.execute(
+            sql_delete(RuleHit).where(RuleHit.risk_id.in_(
+                select(Risk.id).where(Risk.task_id == task_id)
+            ))
+        )
+
+        # 3. Delete KB hits (temp)
+        from ..database.models import KBHitTemp
+
+        await self.session.execute(
+            sql_delete(KBHitTemp).where(KBHitTemp.task_id == task_id)
+        )
+
+        # 4. Delete evidences
+        from ..database.models import Evidence
+
+        await self.session.execute(
+            sql_delete(Evidence).where(Evidence.risk_id.in_(
+                select(Risk.id).where(Risk.task_id == task_id)
+            ))
+        )
+
+        # 5. Delete risks
+        await self.session.execute(
+            sql_delete(Risk).where(Risk.task_id == task_id)
+        )
+
+        # 6. Delete clauses
+        await self.session.execute(
+            sql_delete(Clause).where(Clause.task_id == task_id)
+        )
+
+        # 7. Delete task events
+        await self.session.execute(
+            sql_delete(TaskEvent).where(TaskEvent.task_id == task_id)
+        )
+
+        # 8. Delete reviews
+        from ..database.models import Review
+
+        await self.session.execute(
+            sql_delete(Review).where(Review.task_id == task_id)
+        )
+
+        # 9. Delete config snapshot
+        if task.config_snapshot_id:
+            config_snapshot = await self.session.get(
+                ConfigSnapshot, task.config_snapshot_id
+            )
+            if config_snapshot:
+                await self.session.delete(config_snapshot)
+
+        # 10. Finally delete the task
+        await self.session.delete(task)
+        await self.session.commit()
+
+        return True

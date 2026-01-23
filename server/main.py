@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from server.config import settings
 from server.database.connection import close_db, init_db
 from server.rate_limit import RATE_LIMITS, limiter
-from server.routes import contracts, dashboard, health, kb, tasks
+from server.routes import contracts, dashboard, health, kb, metrics, tasks
 
 # Configure logging
 logging.basicConfig(
@@ -85,6 +85,7 @@ app.include_router(contracts.router)
 app.include_router(tasks.router)
 app.include_router(kb.router)
 app.include_router(dashboard.router)
+app.include_router(metrics.router)
 app.include_router(health.router)
 
 

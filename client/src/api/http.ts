@@ -25,6 +25,16 @@ export async function post<T>(path: string, data?: any): Promise<T> {
   return response.json();
 }
 
+export async function del<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function uploadFile<T>(
   path: string,
   file: File,

@@ -12,6 +12,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings"""
 
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
     # ZhipuAI
     zhipu_api_key: Optional[str] = None  # Make optional for testing
     zhipu_chat_model: str = "glm-4-flash"
@@ -36,10 +40,6 @@ class Settings(BaseSettings):
     # Rate Limiting
     enable_rate_limit: bool = True
     rate_limit_per_hour: int = 200  # Default rate limit per IP per hour
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 # Global settings instance

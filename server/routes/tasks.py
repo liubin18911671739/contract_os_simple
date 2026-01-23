@@ -106,7 +106,26 @@ async def cancel_task(
 ) -> SuccessResponse:
     """Cancel a running task"""
     task_service = TaskService(session)
+
+    # Check if task exists
+    task = await task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check if task can be cancelled
+    status = task.get("status")
+    if status in ("COMPLETED", "FAILED", "CANCELLED"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel task with status {status}",
+        )
+
+    # Set cancel flag in database
     await task_service.set_cancel_requested(task_id)
+
+    # Notify orchestrator
+    orchestrator = get_orchestrator()
+    await orchestrator.cancel_task(task_id)
 
     return SuccessResponse(success=True)
 
@@ -267,3 +286,22 @@ async def download_report(
         media_type="text/html",
         content_disposition_type="attachment",
     )
+
+
+@router.delete("/{task_id}")
+async def delete_task(
+    task_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    """Delete a task and all its related data"""
+    task_service = TaskService(session)
+
+    try:
+        success = await task_service.delete_task(task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return SuccessResponse(success=True)

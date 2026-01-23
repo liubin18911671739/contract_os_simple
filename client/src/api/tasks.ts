@@ -1,7 +1,7 @@
 /**
  * Task API
  */
-import { get, post } from './http';
+import { del, get, post } from './http';
 
 export interface PrecheckTask {
   id: string;
@@ -72,4 +72,8 @@ export async function getReportDownloadUrl(reportId: string): Promise<string> {
 
 export async function getTaskReports(taskId: string) {
   return get(`/precheck-tasks/${taskId}/reports`);
+}
+
+export async function deleteTask(taskId: string): Promise<{ success: boolean }> {
+  return del(`/precheck-tasks/${taskId}`);
 }

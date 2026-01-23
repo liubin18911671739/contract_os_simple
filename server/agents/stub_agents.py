@@ -115,57 +115,142 @@ class KBRetrievalAgent(BaseAgent):
 
     async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve KB documents for each clause"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         # Get KB collections for this task
         from server.services.task_service import TaskService
 
         task_service = TaskService(self.session)
-        collection_ids = await task_service.get_task_kb_collections(task_id)
+
+        try:
+            collection_ids = await task_service.get_task_kb_collections(task_id)
+        except Exception as e:
+            logger.warning(f"Failed to get KB collections for task {task_id}: {e}")
+            collection_ids = []
+
+        # Early return if no collections configured
+        if not collection_ids:
+            await self.log_event(
+                task_id,
+                "warning",
+                "No KB collections configured for this task. Skipping KB retrieval.",
+            )
+            await self.update_progress(task_id, 50)
+            return {"kb_hits_count": 0, "skipped_reason": "no_collections"}
 
         # Get clauses
         query = select(Clause).where(Clause.task_id == task_id)
         result = await self.session.execute(query)
         clauses = result.scalars().all()
 
-        kb_hits_count = 0
+        if not clauses:
+            await self.log_event(
+                task_id,
+                "warning",
+                "No clauses found for KB retrieval.",
+            )
+            await self.update_progress(task_id, 50)
+            return {"kb_hits_count": 0, "skipped_reason": "no_clauses"}
 
-        for clause in clauses:
-            for collection_id in collection_ids:
-                # Search KB
-                chunks = await self.kb_service.search_chunks(
-                    collection_id, clause.text, top_k=10
+        kb_hits_count = 0
+        errors_count = 0
+        collections_processed = set()
+
+        for clause_idx, clause in enumerate(clauses):
+            # Log progress for long-running tasks
+            if clause_idx > 0 and clause_idx % 5 == 0:
+                await self.log_event(
+                    task_id,
+                    "info",
+                    f"KB retrieval progress: {clause_idx}/{len(clauses)} clauses processed",
                 )
 
-                # Rerank
-                if chunks:
-                    chunks = await self.kb_service.rerank_chunks(
-                        clause.text, chunks, top_n=6
+            for collection_id in collection_ids:
+                collection_key = f"{collection_id}"
+
+                try:
+                    # Search KB
+                    chunks = await self.kb_service.search_chunks(
+                        collection_id, clause.text, top_k=10
                     )
 
-                # Store hits
-                for chunk in chunks:
-                    hit_id = f"kb_hit_{uuid.uuid4().hex[:12]}"
-                    hit = KBHitTemp(
-                        id=hit_id,
-                        task_id=task_id,
-                        clause_id=clause.clause_id,
-                        chunk_id=chunk["chunk_id"],
-                        score=chunk.get("_rerank_score", chunk["score"]),
-                        quote_text=chunk["text"][:500],
-                        doc_title=chunk.get("meta", {}).get("title", "KB Document"),
-                        doc_version=1,
+                    # Rerank if we have results
+                    if chunks:
+                        try:
+                            chunks = await self.kb_service.rerank_chunks(
+                                clause.text, chunks, top_n=6
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Rerank failed for task {task_id}, clause {clause.clause_id}: {e}. Using search results."
+                            )
+                            # Continue with search results without reranking
+
+                    # Store hits
+                    for chunk in chunks:
+                        hit_id = f"kb_hit_{uuid.uuid4().hex[:12]}"
+                        hit = KBHitTemp(
+                            id=hit_id,
+                            task_id=task_id,
+                            clause_id=clause.clause_id,
+                            chunk_id=chunk["chunk_id"],
+                            score=chunk.get("_rerank_score", chunk["score"]),
+                            quote_text=chunk["text"][:500],
+                            doc_title=chunk.get("meta", {}).get("title", "KB Document"),
+                            doc_version=1,
+                        )
+
+                        self.session.add(hit)
+                        kb_hits_count += 1
+                        collections_processed.add(collection_key)
+
+                except RuntimeError as e:
+                    # LLM API errors (embedding failure, etc.)
+                    errors_count += 1
+                    logger.error(
+                        f"KB search failed for task {task_id}, collection {collection_id}: {e}"
                     )
+                    await self.log_event(
+                        task_id,
+                        "warning",
+                        f"KB search failed for collection {collection_id}: {str(e)}",
+                    )
+                    # Continue with other collections
+                except Exception as e:
+                    errors_count += 1
+                    logger.error(
+                        f"Unexpected error in KB retrieval for task {task_id}: {e}"
+                    )
+                    # Continue processing
 
-                    self.session.add(hit)
-                    kb_hits_count += 1
+        try:
+            await self.session.commit()
+        except Exception as e:
+            logger.error(f"Failed to commit KB hits for task {task_id}: {e}")
+            await self.session.rollback()
+            raise
 
-        await self.session.commit()
         await self.update_progress(task_id, 50)
 
+        log_message = f"Retrieved {kb_hits_count} KB references"
+        if errors_count > 0:
+            log_message += f" ({errors_count} errors)"
+        if not collections_processed:
+            log_message += " (no KB collections had indexed content)"
+
         await self.log_event(
-            task_id, "info", f"Retrieved {kb_hits_count} KB references"
+            task_id,
+            "warning" if errors_count > 0 or not collections_processed else "info",
+            log_message,
         )
 
-        return {"kb_hits_count": kb_hits_count}
+        return {
+            "kb_hits_count": kb_hits_count,
+            "errors_count": errors_count,
+            "collections_processed": len(collections_processed),
+        }
 
 
 class EvidenceAgent(BaseAgent):

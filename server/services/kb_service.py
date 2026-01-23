@@ -3,7 +3,9 @@ Knowledge Base Service
 Manages KB collections, documents, chunks, and embeddings
 """
 
+import asyncio
 import hashlib
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,6 +17,12 @@ from ..config import get_storage_path, settings
 from ..database.models import KBChunk, KBCollection, KBDocument, KBEmbedding
 from ..utils.vector_store import get_vector_store
 from .llm_service import get_llm_service
+
+logger = logging.getLogger(__name__)
+
+# Timeout for KB search operations (seconds)
+KB_SEARCH_TIMEOUT = 30
+KB_RERANK_TIMEOUT = 30
 
 
 class KBService:
@@ -307,8 +315,21 @@ class KBService:
         Returns:
             List of chunks with scores
         """
-        # Generate query embedding
-        query_vector = await self.llm_service.embed_single(query)
+        try:
+            # Generate query embedding with timeout
+            query_vector = await asyncio.wait_for(
+                self.llm_service.embed_single(query),
+                timeout=KB_SEARCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Embedding generation timed out for collection {collection_id}")
+            raise RuntimeError(f"Embedding generation timed out after {KB_SEARCH_TIMEOUT}s")
+        except RuntimeError as e:
+            logger.error(f"Embedding generation failed for collection {collection_id}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in embedding generation: {e}")
+            raise RuntimeError(f"Embedding generation failed: {str(e)}")
 
         # Search Faiss index
         vector_store = get_vector_store(collection_id)
@@ -360,4 +381,14 @@ class KBService:
         Returns:
             Reranked chunks
         """
-        return await self.llm_service.rerank(query, chunks, top_n)
+        try:
+            return await asyncio.wait_for(
+                self.llm_service.rerank(query, chunks, top_n),
+                timeout=KB_RERANK_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Rerank timed out, returning original chunks (top {top_n})")
+            return chunks[:top_n]
+        except Exception as e:
+            logger.warning(f"Rerank failed: {e}, returning original chunks (top {top_n})")
+            return chunks[:top_n]
