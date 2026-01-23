@@ -2,11 +2,11 @@
 File Parser Utilities
 Extract text from PDF, DOCX, and TXT files
 """
-from io import BytesIO
-from typing import Optional
 
-from PyPDF2 import PdfReader
+from io import BytesIO
+
 from docx import Document
+from PyPDF2 import PdfReader
 
 
 def parse_pdf(file_content: bytes) -> str:
@@ -98,7 +98,8 @@ def parse_file(file_content: bytes, mime_type: str) -> str:
     if mime_type == "application/pdf":
         return parse_pdf(file_content)
     elif mime_type in [
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument."
+        "wordprocessingml.document",
         "application/docx",
     ]:
         return parse_docx(file_content)

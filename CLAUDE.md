@@ -34,10 +34,9 @@ python scripts/seed_kb.py
 
 ### Running the Application
 ```bash
-# Backend (development mode with auto-reload)
-cd server
-python main.py
-# OR: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Backend (development mode with auto-reload) - from project root
+. .venv/bin/activate
+python -m uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 
 # Frontend (separate terminal)
 cd client
@@ -58,13 +57,51 @@ rm data/database.db && python scripts/init_db.py
 
 ### Testing
 ```bash
-# Run all tests
-cd server
-pytest tests/
+# Run all tests (from project root)
+pytest
 
 # Run specific test file
-pytest tests/test_llm_service.py -v
+pytest server/tests/test_task_service.py
+
+# Run specific test
+pytest server/tests/test_task_service.py::test_create_task
+
+# Run with coverage report
+pytest --cov=server --cov-report=html
+open htmlcov/index.html  # macOS
+
+# Run performance benchmarks
+python server/tests/benchmarks.py
 ```
+
+**Test Framework Details**:
+- Uses `pytest` with `pytest-asyncio` for async test support
+- Test fixtures in `server/tests/conftest.py` provide test_db, test_settings, sample data
+- Tests use temporary databases (`/tmp/test_db.db`) for isolation
+- Set environment variables before imports in conftest.py for test configuration
+- Run `pytest server/tests/ -v` for verbose output
+
+### Docker Deployment
+```bash
+# Build and start with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
+# Rebuild after code changes
+docker-compose up -d --build
+```
+
+**Docker Configuration**:
+- Multi-stage build in `Dockerfile` (builder + runtime stages)
+- Exposes port 8000 for FastAPI
+- Volume mounts for data persistence (`./data`, `./storage`)
+- Health check endpoint at `/api/health`
+- Environment variables loaded from `.env` file
 
 ## Architecture
 
@@ -193,3 +230,16 @@ File parsing (`server/utils/file_parser.py`):
 - **LLM rate limits**: Adjust `MAX_API_CONCURRENT` in `.env`
 - **Faiss import issues**: Verify numpy version compatibility
 - **Agent stuck**: Check event logs via `task_events` table
+
+## Testing Configuration
+
+**Test Database Schema Note**:
+- `RuleHit.risk_id` is `nullable=True` to allow rule hits before risks are created
+- Test environment variables set in `pytest.ini` and `.env.test`
+- Tests use `@pytest.mark.asyncio` for async test functions
+- Temporary test databases created per test function for isolation
+
+**Current Test Coverage**:
+- `test_task_service.py` - CRUD operations, progress updates, event logging, pagination
+- `test_agents.py` - RulesAgent keyword matching
+- Benchmarks available in `server/tests/benchmarks.py` for performance testing

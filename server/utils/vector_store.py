@@ -2,14 +2,13 @@
 Faiss Vector Store wrapper
 Handles vector indexing and search for knowledge base chunks
 """
+
 import pickle
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
 import faiss
 import numpy as np
-
-from ..config import settings
 
 
 class FaissVectorStore:
@@ -74,7 +73,9 @@ class FaissVectorStore:
             chunk_ids: List of chunk IDs corresponding to vectors
         """
         if len(vectors) != len(chunk_ids):
-            raise ValueError("Number of vectors must match number of chunk IDs")
+            raise ValueError(
+                "Number of vectors must match number of chunk IDs"
+            )
 
         # Convert to numpy array
         vectors_array = np.array(vectors, dtype=np.float32)
@@ -83,7 +84,8 @@ class FaissVectorStore:
         faiss.normalize_L2(vectors_array)
 
         # Add to index
-        self.index.add(vectors_array)
+        if self.index is not None:
+            self.index.add(vectors_array)
 
         # Track chunk IDs
         self.chunk_ids.extend(chunk_ids)
@@ -101,7 +103,7 @@ class FaissVectorStore:
         Returns:
             List of (chunk_id, score) tuples
         """
-        if self.index.ntotal == 0:
+        if self.index is None or self.index.ntotal == 0:
             return []
 
         # Convert and normalize query
@@ -109,7 +111,9 @@ class FaissVectorStore:
         faiss.normalize_L2(query_array)
 
         # Search
-        scores, indices = self.index.search(query_array, min(top_k, self.index.ntotal))
+        scores, indices = self.index.search(
+            query_array, min(top_k, self.index.ntotal)
+        )
 
         # Convert results
         results = []

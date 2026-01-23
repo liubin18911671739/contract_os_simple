@@ -2,9 +2,10 @@
 Rate Limiting Configuration
 Implements IP-based rate limiting using slowapi
 """
+
+from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from fastapi import Request
 
 
 def get_real_client_ip(request: Request) -> str:
@@ -44,19 +45,14 @@ limiter = Limiter(
 RATE_LIMITS = {
     # Health check - very permissive
     "health": "60/minute",
-
     # Task creation - stricter limit
     "create_task": "10/hour",
-
     # File upload - very strict (resource intensive)
     "upload_file": "20/hour",
-
     # KB operations - moderate limit
     "kb_mutations": "30/hour",
-
     # Read operations - permissive
     "read_operations": "300/hour",
-
     # Report generation - strict (resource intensive)
     "generate_report": "10/hour",
 }

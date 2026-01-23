@@ -1,26 +1,19 @@
 """
 Report Agent - Generate HTML analysis report
 """
+
 import logging
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
-from sqlalchemy import select, delete, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import (
-    Clause,
-    Risk,
-    KBHitTemp,
-    Evidence,
-    PrecheckTask,
-    Contract,
-    ContractVersion,
-)
-from ..database.connection import fetch_all_sql
-from ..services.file_service import FileService
-from .base import BaseAgent
-
+from server.database.connection import fetch_all_sql
+from server.database.models import (Clause, Contract, ContractVersion,
+                                     Evidence, KBHitTemp, PrecheckTask, Risk)
+from server.services.file_service import FileService
+from server.agents.base import BaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +27,7 @@ class ReportAgent(BaseAgent):
         super().__init__(session)
         self.file_service = FileService()
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate HTML report and mark task as complete
 
@@ -56,7 +47,9 @@ class ReportAgent(BaseAgent):
         html_content = self._generate_html_report(report_data)
 
         # Save report file
-        report_filename = f"report_{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        report_filename = (
+            f"report_{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        )
         object_key = self.file_service.save_file(
             "reports",
             report_filename,
@@ -73,9 +66,7 @@ class ReportAgent(BaseAgent):
 
         await self.update_progress(task_id, 100, status="COMPLETED")
 
-        await self.log_event(
-            task_id, "info", f"Report generated: {object_key}"
-        )
+        await self.log_event(task_id, "info", f"Report generated: {object_key}")
 
         return {
             "status": "completed",
@@ -196,11 +187,15 @@ class ReportAgent(BaseAgent):
                 "updated_at": task.updated_at.isoformat(),
                 "kb_mode": task.kb_mode,
             },
-            "contract": {
-                "id": contract_data[0].id if contract_data else None,
-                "title": contract_data[0].title if contract_data else "Unknown",
-                "version": contract_data[1].version_number if contract_data else 1,
-            } if contract_data else None,
+            "contract": (
+                {
+                    "id": contract_data[0].id if contract_data else None,
+                    "title": contract_data[0].title if contract_data else "Unknown",
+                    "version": contract_data[1].version_number if contract_data else 1,
+                }
+                if contract_data
+                else None
+            ),
             "clauses": clauses_with_risks,
             "risks": all_risks,
             "stats": stats or {},
@@ -509,7 +504,7 @@ class ReportAgent(BaseAgent):
 
         risk_items = []
         for risk in risks:
-            risk_level = risk.get('risk_level', 'INFO')
+            risk_level = risk.get("risk_level", "INFO")
             risk_class = f"badge-{risk_level.lower()}"
 
             risk_items.append(f"""

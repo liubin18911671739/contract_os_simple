@@ -2,16 +2,17 @@
 Contract Service
 Manages contracts and versions
 """
+
 import hashlib
 import uuid
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import Contract, ContractVersion
 from ..config import get_storage_path
+from ..database.models import Contract, ContractVersion
 from .file_service import FileService
 
 
@@ -69,9 +70,11 @@ class ContractService:
             return None
 
         # Get versions
-        query = select(ContractVersion).where(
-            ContractVersion.contract_id == contract_id
-        ).order_by(ContractVersion.version_no.desc())
+        query = (
+            select(ContractVersion)
+            .where(ContractVersion.contract_id == contract_id)
+            .order_by(ContractVersion.version_no.desc())
+        )
 
         result = await self.session.execute(query)
         versions = result.scalars().all()
@@ -117,9 +120,11 @@ class ContractService:
         file_hash = hashlib.sha256(file_content).hexdigest()
 
         # Get next version number
-        query = select(ContractVersion).where(
-            ContractVersion.contract_id == contract_id
-        ).order_by(ContractVersion.version_no.desc())
+        query = (
+            select(ContractVersion)
+            .where(ContractVersion.contract_id == contract_id)
+            .order_by(ContractVersion.version_no.desc())
+        )
 
         result = await self.session.execute(query)
         last_version = result.first()
@@ -158,9 +163,7 @@ class ContractService:
             "sha256": file_hash,
         }
 
-    async def get_contract_version_path(
-        self, version_id: str
-    ) -> Optional[str]:
+    async def get_contract_version_path(self, version_id: str) -> Optional[str]:
         """
         Get file path for a contract version
 
@@ -178,9 +181,7 @@ class ContractService:
         storage_path = get_storage_path("contracts")
         return str(storage_path / version.object_key)
 
-    async def get_contract_version_content(
-        self, version_id: str
-    ) -> Optional[bytes]:
+    async def get_contract_version_content(self, version_id: str) -> Optional[bytes]:
         """
         Get file content for a contract version
 

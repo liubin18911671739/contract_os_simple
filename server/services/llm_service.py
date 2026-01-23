@@ -2,12 +2,14 @@
 LLM Service - ZhipuAI unified client
 Provides chat, embedding, and reranking capabilities
 """
+
 import asyncio
-from typing import List, Dict, Any
+import re
+from typing import Any, Dict, List
 
 from zhipuai import ZhipuAI
-from ..config import settings
 
+from ..config import settings
 
 # Semaphore for API concurrency control
 _api_semaphore = asyncio.Semaphore(settings.max_api_concurrent)
@@ -77,7 +79,9 @@ class LLMService:
 
         for attempt in range(max_retries + 1):
             response_text = await self.chat(messages, temperature)
-            logger.debug(f"LLM response (attempt {attempt + 1}): {response_text[:200]}...")
+            logger.debug(
+                f"LLM response (attempt {attempt + 1}): {response_text[:200]}..."
+            )
 
             # Try to extract JSON from response
             try:
@@ -91,28 +95,36 @@ class LLMService:
                 # Try multiple extraction strategies
                 result = self._try_extract_json(response_text)
                 if result:
-                    logger.info(f"Successfully extracted JSON using fallback strategy on attempt {attempt + 1}")
+                    logger.info(
+                        f"Successfully extracted JSON using fallback strategy on attempt {attempt + 1}"
+                    )
                     return result
 
                 # If last attempt, return fallback instead of raising
                 if attempt == max_retries:
-                    logger.error(f"Failed to parse JSON after {max_retries} retries. Using fallback structure.")
+                    logger.error(
+                        f"Failed to parse JSON after {max_retries} retries. Using fallback structure."
+                    )
                     logger.debug(f"Failed response: {response_text[:1000]}")
                     return self._get_fallback_response()
 
                 # Add retry prompt with more specific instructions
-                messages.append({
-                    "role": "assistant",
-                    "content": response_text,
-                })
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your response was not valid JSON. Please respond ONLY with valid JSON format. "
-                        "Do not include any explanatory text outside the JSON. "
-                        "The response must start with '{' and end with '}'."
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response_text,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your response was not valid JSON. Please respond ONLY with valid JSON format. "
+                            "Do not include any explanatory text outside the JSON. "
+                            "The response must start with '{' and end with '}'."
+                        ),
+                    }
+                )
 
     def _try_extract_json(self, text: str) -> Dict[str, Any] | None:
         """
@@ -130,13 +142,10 @@ class LLMService:
         strategies = [
             # Strategy 1: Find JSON between curly braces
             lambda t: self._extract_braces(t),
-
             # Strategy 2: Extract from ```json code block
             lambda t: self._extract_from_markdown(t, "json"),
-
             # Strategy 3: Extract from any ``` code block
             lambda t: self._extract_from_markdown(t, None),
-
             # Strategy 4: Try to fix common JSON issues
             lambda t: self._fix_and_parse(t),
         ]
@@ -161,14 +170,16 @@ class LLMService:
 
         if start != -1 and end != -1 and end > start:
             try:
-                json_str = text[start:end + 1]
+                json_str = text[start : end + 1]
                 return json.loads(json_str)
             except json.JSONDecodeError:
                 pass
 
         return None
 
-    def _extract_from_markdown(self, text: str, lang: str | None) -> Dict[str, Any] | None:
+    def _extract_from_markdown(
+        self, text: str, lang: str | None
+    ) -> Dict[str, Any] | None:
         """Extract JSON from markdown code block"""
         import json
 
@@ -178,6 +189,7 @@ class LLMService:
             pattern = "```\\s*([\\s\\S]*?)```"
 
         import re
+
         match = re.search(pattern, text, re.DOTALL)
 
         if match:
@@ -221,13 +233,15 @@ class LLMService:
             Default risk analysis structure
         """
         return {
-            "risks": [{
-                "risk_level": "INFO",
-                "risk_type": "LLM_ERROR",
-                "confidence": 0.0,
-                "summary": "LLM分析失败，需要人工审查。LLM分析出现问题，无法生成结构化风险数据，请手动检查合同条款。",
-                "kb_evidence": []
-            }]
+            "risks": [
+                {
+                    "risk_level": "INFO",
+                    "risk_type": "LLM_ERROR",
+                    "confidence": 0.0,
+                    "summary": "LLM分析失败，需要人工审查。LLM分析出现问题，无法生成结构化风险数据，请手动检查合同条款。",
+                    "kb_evidence": [],
+                }
+            ]
         }
 
     async def embed(self, texts: List[str]) -> List[List[float]]:

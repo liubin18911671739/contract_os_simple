@@ -1,11 +1,13 @@
 """
 Tests for Task Service
 """
-import pytest
+
 import uuid
+
+import pytest
 from sqlalchemy import select
 
-from server.database.models import PrecheckTask, TaskEvent, ConfigSnapshot
+from server.database.models import PrecheckTask, TaskEvent
 from server.services.task_service import TaskService
 
 
@@ -15,8 +17,9 @@ async def test_create_task(test_db):
     service = TaskService(test_db)
 
     # First, create a contract and version
-    from server.database.models import Contract, ContractVersion
     import uuid
+
+    from server.database.models import Contract, ContractVersion
 
     contract_id = f"contract_{uuid.uuid4().hex[:12]}"
     contract = Contract(
@@ -63,8 +66,10 @@ async def test_get_task(test_db):
     service = TaskService(test_db)
 
     # Create test data
-    from server.database.models import Contract, ContractVersion, ConfigSnapshot
     import uuid
+
+    from server.database.models import (ConfigSnapshot, Contract,
+                                        ContractVersion)
 
     contract_id = f"contract_{uuid.uuid4().hex[:12]}"
     contract = Contract(
@@ -125,8 +130,10 @@ async def test_update_task_progress(test_db):
     service = TaskService(test_db)
 
     # Create test task
-    from server.database.models import Contract, ContractVersion, ConfigSnapshot
     import uuid
+
+    from server.database.models import (ConfigSnapshot, Contract,
+                                        ContractVersion)
 
     contract_id = f"contract_{uuid.uuid4().hex[:12]}"
     contract = Contract(
@@ -220,8 +227,10 @@ async def test_list_tasks(test_db):
     service = TaskService(test_db)
 
     # Create test data
-    from server.database.models import Contract, ContractVersion, ConfigSnapshot
     import uuid
+
+    from server.database.models import (ConfigSnapshot, Contract,
+                                        ContractVersion)
 
     # Create contract
     contract_id = f"contract_{uuid.uuid4().hex[:12]}"

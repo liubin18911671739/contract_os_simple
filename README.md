@@ -177,6 +177,26 @@ contract_os_simple/
 
    前端将运行在 `http://localhost:5173`
 
+## 运行测试
+
+```bash
+# 运行所有测试
+pytest
+
+# 运行特定测试文件
+pytest server/tests/test_task_service.py
+
+# 运行测试并生成覆盖率报告
+pytest --cov=server --cov-report=html
+
+# 查看覆盖率报告
+open htmlcov/index.html  # macOS
+```
+
+**注意**: 测试会自动使用测试环境变量，无需配置 `.env` 文件。
+
+详细的测试指南请参考 [TEST_GUIDE.md](TEST_GUIDE.md)。
+
 ## API 端点
 
 所有端点与原 Node.js 版本完全兼容：
@@ -307,9 +327,16 @@ API 完全兼容。迁移步骤：
 
 ## 相关文档
 
+### 核心文档
+- [DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) - 完整的开发指南（开发环境配置、架构说明、最佳实践）
+- [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md) - 部署指南（Docker、云平台、生产环境配置）
+- [API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) - API 文档（所有端点、请求/响应格式、示例）
+- [TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) - 故障排除指南（常见问题诊断和解决方案）
+
+### 其他文档
 - [TODO.md](./TODO.md) - 开发任务和 POC 验收标准
-- [QUICKSTART.md](./QUICKSTART.md) - 10 分钟快速指南
-- [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) - 技术实现细节
-- [SETUP_COMPLETE.md](./SETUP_COMPLETE.md) - 安装完成指南
+- [QUICKSTART.md](./docs/QUICKSTART.md) - 10 分钟快速指南
+- [IMPLEMENTATION_SUMMARY.md](./docs/IMPLEMENTATION_SUMMARY.md) - 技术实现细节
+- [SETUP_COMPLETE.md](./docs/SETUP_COMPLETE.md) - 安装完成指南
 - [CLAUDE.md](./CLAUDE.md) - AI 助手开发指南
-# contract_os_simple
+- [TEST_GUIDE.md](./docs/TEST_GUIDE.md) - 测试指南

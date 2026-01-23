@@ -2,11 +2,11 @@
 Pydantic models for API request/response validation
 Ensures API compatibility with the original Node.js version
 """
+
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
-
 
 # ==================== Contract Models ====================
 
@@ -37,9 +37,7 @@ class CreatePrecheckTaskRequest(BaseModel):
     """Request to create a precheck task"""
 
     contract_version_id: str = Field(..., description="Contract version ID")
-    kb_collection_ids: List[str] = Field(
-        ..., description="KB collection IDs to use"
-    )
+    kb_collection_ids: List[str] = Field(..., description="KB collection IDs to use")
     kb_mode: str = Field("STRICT", description="KB mode: STRICT or RELAXED")
     template_id: Optional[str] = Field(None, description="Report template ID")
 

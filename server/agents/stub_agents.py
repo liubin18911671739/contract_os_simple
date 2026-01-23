@@ -2,24 +2,19 @@
 Stub Agents for remaining stages
 These can be expanded later with full implementations
 """
-import uuid
-from typing import Dict, Any, List
 
-from sqlalchemy import select, delete
+import uuid
+from typing import Any, Dict, List
+
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import (
-    Clause,
-    RuleHit,
-    KBHitTemp,
-    Risk,
-    Evidence,
-    Review,
-)
-from ..database.connection import fetch_one_sql
-from ..services.kb_service import KBService
-from ..services.llm_service import get_llm_service
-from .base import BaseAgent
+from server.database.connection import fetch_one_sql
+from server.database.models import (Clause, Evidence, KBHitTemp, Review,
+                                     Risk, RuleHit)
+from server.services.kb_service import KBService
+from server.services.llm_service import get_llm_service
+from server.agents.base import BaseAgent
 
 
 class RulesAgent(BaseAgent):
@@ -32,7 +27,11 @@ class RulesAgent(BaseAgent):
         {
             "rule_id": "unlimited_liability",
             "rule_name": "Unlimited Liability",
-            "keywords": ["unlimited liability", "without limitation", "all liabilities"],
+            "keywords": [
+                "unlimited liability",
+                "without limitation",
+                "all liabilities",
+            ],
             "risk_level": "HIGH",
             "risk_type": "LIABILITY",
         },
@@ -52,9 +51,7 @@ class RulesAgent(BaseAgent):
         },
     ]
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Apply rule-based risk detection"""
         query = select(Clause).where(Clause.task_id == task_id)
         result = await self.session.execute(query)
@@ -67,10 +64,7 @@ class RulesAgent(BaseAgent):
 
             for rule in self.RULES:
                 # Check if any keyword matches
-                if any(
-                    kw in clause_text_lower
-                    for kw in rule["keywords"]
-                ):
+                if any(kw in clause_text_lower for kw in rule["keywords"]):
                     # Find matched text
                     matched_text = self._find_matched_text(
                         clause.text, rule["keywords"]
@@ -95,9 +89,7 @@ class RulesAgent(BaseAgent):
         await self.session.commit()
         await self.update_progress(task_id, 37)
 
-        await self.log_event(
-            task_id, "info", f"Found {rule_hits_count} rule hits"
-        )
+        await self.log_event(task_id, "info", f"Found {rule_hits_count} rule hits")
 
         return {"rule_hits_count": rule_hits_count}
 
@@ -121,12 +113,11 @@ class KBRetrievalAgent(BaseAgent):
         super().__init__(session)
         self.kb_service = KBService(session)
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve KB documents for each clause"""
         # Get KB collections for this task
-        from ..services.task_service import TaskService
+        from server.services.task_service import TaskService
+
         task_service = TaskService(self.session)
         collection_ids = await task_service.get_task_kb_collections(task_id)
 
@@ -182,9 +173,7 @@ class EvidenceAgent(BaseAgent):
 
     stage_name = "EVIDENCING"
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Collect evidence for risks"""
         # Get all risks with their associated clauses in a single query
         # This fixes the N+1 query problem
@@ -215,9 +204,7 @@ class EvidenceAgent(BaseAgent):
         await self.session.commit()
         await self.update_progress(task_id, 87)
 
-        await self.log_event(
-            task_id, "info", f"Collected {evidence_count} evidences"
-        )
+        await self.log_event(task_id, "info", f"Collected {evidence_count} evidences")
 
         return {"evidence_count": evidence_count}
 
@@ -227,9 +214,7 @@ class QCAgent(BaseAgent):
 
     stage_name = "QCING"
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Perform QC checks"""
         # Get task summary
         summary = await fetch_one_sql(

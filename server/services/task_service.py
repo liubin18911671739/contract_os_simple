@@ -2,24 +2,18 @@
 Task Service
 Manages precheck task lifecycle
 """
+
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, and_, update, func
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import (
-    PrecheckTask,
-    TaskEvent,
-    ConfigSnapshot,
-    TaskKBSnapshot,
-    ContractVersion,
-    Contract,
-    Clause,
-    Risk,
-)
-from ..database.connection import fetch_one_sql, fetch_all_sql
+from ..database.connection import fetch_all_sql, fetch_one_sql
+from ..database.models import (Clause, ConfigSnapshot, Contract,
+                               ContractVersion, PrecheckTask, Risk, TaskEvent,
+                               TaskKBSnapshot)
 
 
 class TaskService:
@@ -57,9 +51,7 @@ class TaskService:
                 "embed_model": "embedding-3",
             },
             prompt_template_version="v1.0",
-            kb_collection_versions_json={
-                col_id: 1 for col_id in kb_collection_ids
-            },
+            kb_collection_versions_json={col_id: 1 for col_id in kb_collection_ids},
         )
         self.session.add(config_snapshot)
 
@@ -125,7 +117,9 @@ class TaskService:
                 Contract.contract_name,
             )
             .select_from(PrecheckTask)
-            .join(ContractVersion, PrecheckTask.contract_version_id == ContractVersion.id)
+            .join(
+                ContractVersion, PrecheckTask.contract_version_id == ContractVersion.id
+            )
             .join(Contract, ContractVersion.contract_id == Contract.id)
             .where(PrecheckTask.id == task_id)
         )
@@ -190,7 +184,9 @@ class TaskService:
                 Contract.contract_name,
             )
             .select_from(PrecheckTask)
-            .join(ContractVersion, PrecheckTask.contract_version_id == ContractVersion.id)
+            .join(
+                ContractVersion, PrecheckTask.contract_version_id == ContractVersion.id
+            )
             .join(Contract, ContractVersion.contract_id == Contract.id)
         )
 
@@ -291,9 +287,11 @@ class TaskService:
 
     async def get_task_events(self, task_id: str) -> List[Dict[str, Any]]:
         """Get task events"""
-        query = select(TaskEvent).where(
-            TaskEvent.task_id == task_id
-        ).order_by(TaskEvent.ts.asc())
+        query = (
+            select(TaskEvent)
+            .where(TaskEvent.task_id == task_id)
+            .order_by(TaskEvent.ts.asc())
+        )
 
         result = await self.session.execute(query)
         events = result.scalars().all()
@@ -389,10 +387,12 @@ class TaskService:
                 Risk.status,
             )
             .select_from(Clause)
-            .outerjoin(Risk, and_(
-                Risk.clause_id == Clause.clause_id,
-                Risk.task_id == Clause.task_id
-            ))
+            .outerjoin(
+                Risk,
+                and_(
+                    Risk.clause_id == Clause.clause_id, Risk.task_id == Clause.task_id
+                ),
+            )
             .where(Clause.task_id == task_id)
         )
 
@@ -402,8 +402,7 @@ class TaskService:
         if search_query:
             pattern = f"%{search_query}%"
             query = query.where(
-                Clause.text.ilike(pattern)
-                | Clause.title.ilike(pattern)
+                Clause.text.ilike(pattern) | Clause.title.ilike(pattern)
             )
 
         query = query.order_by(Clause.order_no)

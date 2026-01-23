@@ -1,24 +1,22 @@
 """
 Database connection management for SQLite
 """
+
 import asyncio
 from pathlib import Path
 from typing import AsyncGenerator
 
 import aiosqlite
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    AsyncEngine,
-    create_async_engine,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import (AsyncEngine, AsyncSession,
+                                    async_sessionmaker, create_async_engine)
 from sqlalchemy.orm import DeclarativeBase
 
-from ..config import settings, get_db_path
+from ..config import get_db_path, settings
 
 
 class Base(DeclarativeBase):
     """Base class for all ORM models"""
+
     pass
 
 
@@ -51,6 +49,7 @@ def get_engine() -> AsyncEngine:
             dbapi_conn.execute("PRAGMA synchronous=NORMAL")
 
         from sqlalchemy import event
+
         event.listen(_engine.sync_engine, "connect", on_connect)
 
     return _engine
@@ -90,7 +89,7 @@ async def init_db():
     engine = get_engine()
     async with engine.begin() as conn:
         # Import all models so they're registered with Base
-        from . import models  # noqa: F401
+        from server.database import models  # noqa: F401
 
         await conn.run_sync(Base.metadata.create_all)
 

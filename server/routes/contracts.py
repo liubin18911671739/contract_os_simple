@@ -1,17 +1,16 @@
 """
 Contract routes
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+
+from fastapi import (APIRouter, Depends, File, HTTPException, Request,
+                     UploadFile)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database.connection import get_session
-from ..schemas.pydantic_models import (
-    CreateContractRequest,
-    ContractResponse,
-    ErrorResponse,
-)
+from ..rate_limit import RATE_LIMITS, limiter
+from ..schemas.pydantic_models import (ContractResponse, CreateContractRequest,
+                                       ErrorResponse)
 from ..services.contract_service import ContractService
-from ..rate_limit import limiter, RATE_LIMITS
 
 router = APIRouter(prefix="/api/contracts", tags=["contracts"])
 

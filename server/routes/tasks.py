@@ -1,27 +1,22 @@
 """
 Task routes
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database.connection import get_session
 from ..orchestrator import get_orchestrator
-from ..schemas.pydantic_models import (
-    CreatePrecheckTaskRequest,
-    TaskResponse,
-    TaskListResponse,
-    TaskEventResponse,
-    TaskSummaryResponse,
-    ClauseResponse,
-    SetConclusionRequest,
-    GenerateReportRequest,
-    SuccessResponse,
-    ErrorResponse,
-)
-from ..services.task_service import TaskService
+from ..rate_limit import RATE_LIMITS, limiter
+from ..schemas.pydantic_models import (ClauseResponse,
+                                       CreatePrecheckTaskRequest,
+                                       ErrorResponse, GenerateReportRequest,
+                                       SetConclusionRequest, SuccessResponse,
+                                       TaskEventResponse, TaskListResponse,
+                                       TaskResponse, TaskSummaryResponse)
 from ..services.file_service import FileService
-from ..rate_limit import limiter, RATE_LIMITS
+from ..services.task_service import TaskService
 
 router = APIRouter(prefix="/api/precheck-tasks", tags=["tasks"])
 
@@ -153,8 +148,9 @@ async def set_task_conclusion(
     session: AsyncSession = Depends(get_session),
 ) -> SuccessResponse:
     """Set task conclusion"""
-    from ..database.models import Review
     import uuid
+
+    from ..database.models import Review
 
     review = Review(
         id=f"review_{uuid.uuid4().hex[:12]}",
@@ -177,9 +173,11 @@ async def generate_report(
     session: AsyncSession = Depends(get_session),
 ):
     """Generate task report (returns report info if already exists)"""
-    from ..database.models import TaskEvent
-    from sqlalchemy import select, desc
     import uuid
+
+    from sqlalchemy import desc, select
+
+    from ..database.models import TaskEvent
 
     task_service = TaskService(session)
     task = await task_service.get_task(task_id)
@@ -224,7 +222,9 @@ async def generate_report(
         )
 
     # Task completed but no report found (shouldn't happen with new ReportAgent)
-    raise HTTPException(status_code=404, detail="Report not found. Please run the task again.")
+    raise HTTPException(
+        status_code=404, detail="Report not found. Please run the task again."
+    )
 
 
 @router.get("/{task_id}/report/download")
@@ -233,8 +233,9 @@ async def download_report(
     session: AsyncSession = Depends(get_session),
 ):
     """Download the generated report file"""
+    from sqlalchemy import desc, select
+
     from ..database.models import TaskEvent
-    from sqlalchemy import select, desc
 
     # Find the most recent report generation event
     events_query = (

@@ -1,14 +1,15 @@
 """
 Split Agent - Split contract into clauses
 """
+
 import re
 import uuid
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import Clause
-from .base import BaseAgent
+from server.database.models import Clause
+from server.agents.base import BaseAgent
 
 
 class SplitAgent(BaseAgent):
@@ -16,9 +17,7 @@ class SplitAgent(BaseAgent):
 
     stage_name = "STRUCTURING"
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Split contract text into clauses
 
@@ -55,9 +54,7 @@ class SplitAgent(BaseAgent):
         await self.session.commit()
         await self.update_progress(task_id, 25)
 
-        await self.log_event(
-            task_id, "info", f"Extracted {len(clauses)} clauses"
-        )
+        await self.log_event(task_id, "info", f"Extracted {len(clauses)} clauses")
 
         return {"clause_count": len(clauses)}
 
@@ -110,10 +107,12 @@ class SplitAgent(BaseAgent):
             paragraphs = text.split("\n\n")
             for i, para in enumerate(paragraphs):
                 if para.strip():
-                    clauses.append({
-                        "title": f"Clause {i + 1}",
-                        "text": para.strip(),
-                        "order_no": i,
-                    })
+                    clauses.append(
+                        {
+                            "title": f"Clause {i + 1}",
+                            "text": para.strip(),
+                            "order_no": i,
+                        }
+                    )
 
         return clauses

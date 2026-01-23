@@ -3,25 +3,21 @@ Task Orchestrator
 Manages the 8-stage task processing pipeline
 Replaces BullMQ with asyncio
 """
+
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agents.llm_risk_agent import LLMRiskAgent
+from .agents.parse_agent import ParseAgent
+from .agents.report_agent import ReportAgent
+from .agents.split_agent import SplitAgent
+from .agents.stub_agents import (EvidenceAgent, KBRetrievalAgent, QCAgent,
+                                 RulesAgent)
 from .config import settings
 from .database.connection import get_session_maker
-from .agents.parse_agent import ParseAgent
-from .agents.split_agent import SplitAgent
-from .agents.stub_agents import (
-    RulesAgent,
-    KBRetrievalAgent,
-    EvidenceAgent,
-    QCAgent,
-)
-from .agents.llm_risk_agent import LLMRiskAgent
-from .agents.report_agent import ReportAgent
-
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -55,13 +51,15 @@ AGENT_CLASSES = {
 class TaskOrchestrator:
     """Orchestrates task processing through all stages with concurrency control"""
 
-    def __init__(self, max_concurrent_tasks: int = None):
+    def __init__(self, max_concurrent_tasks: int | None = None):
         self.running_tasks: Dict[str, asyncio.Task] = {}
         self.cancelled_tasks: set[str] = set()
         # Semaphore for limiting concurrent tasks
         self.max_concurrent = max_concurrent_tasks or settings.max_concurrent_tasks
         self.task_semaphore = asyncio.Semaphore(self.max_concurrent)
-        logger.info(f"TaskOrchestrator initialized with max_concurrent={self.max_concurrent}")
+        logger.info(
+            f"TaskOrchestrator initialized with max_concurrent={self.max_concurrent}"
+        )
 
     async def run_task(self, task_id: str):
         """
@@ -77,7 +75,9 @@ class TaskOrchestrator:
         # Create background task with semaphore control
         async def _run_with_semaphore():
             async with self.task_semaphore:
-                logger.info(f"Task {task_id} started (active: {len(self.running_tasks)}/{self.max_concurrent})")
+                logger.info(
+                    f"Task {task_id} started (active: {len(self.running_tasks)}/{self.max_concurrent})"
+                )
                 try:
                     await self._process_task(task_id)
                 finally:
@@ -106,36 +106,48 @@ class TaskOrchestrator:
             payload: Dict[str, Any] = {}
 
             try:
-                logger.info(f"Task {task_id}: Starting processing through {len(STAGE_ORDER) - 1} stages")
+                logger.info(
+                    f"Task {task_id}: Starting processing through {len(STAGE_ORDER) - 1} stages"
+                )
 
                 # Process each stage
                 for i, stage in enumerate(STAGE_ORDER[1:], 1):  # Skip QUEUED
                     # Check if cancelled
                     if task_id in self.cancelled_tasks:
-                        logger.info(f"Task {task_id}: Cancel requested at stage {stage}")
+                        logger.info(
+                            f"Task {task_id}: Cancel requested at stage {stage}"
+                        )
                         await self._mark_cancelled(session, task_id)
                         return
 
                     # Get agent class
                     agent_class = AGENT_CLASSES.get(stage)
                     if not agent_class:
-                        logger.warning(f"Task {task_id}: No agent found for stage {stage}")
+                        logger.warning(
+                            f"Task {task_id}: No agent found for stage {stage}"
+                        )
                         continue
 
                     # Create agent and execute
-                    logger.info(f"Task {task_id}: Starting stage {i}/{len(STAGE_ORDER)-1} - {stage}")
-                    agent = agent_class(session)
+                    logger.info(
+                        f"Task {task_id}: Starting stage {i}/{len(STAGE_ORDER)-1} - {stage}"
+                    )
+                    agent = agent_class(session)  # type: ignore[arg-type]
 
                     try:
                         result = await agent.execute(task_id, payload)
-                        logger.info(f"Task {task_id}: Completed stage {stage} successfully")
+                        logger.info(
+                            f"Task {task_id}: Completed stage {stage} successfully"
+                        )
 
                         # Merge result into payload for next stage
                         payload.update(result)
 
                     except Exception as e:
                         # Stage failed
-                        logger.error(f"Task {task_id}: Stage {stage} failed with error: {str(e)}")
+                        logger.error(
+                            f"Task {task_id}: Stage {stage} failed with error: {str(e)}"
+                        )
                         await self._mark_failed(session, task_id, stage, str(e))
                         return
 
@@ -145,7 +157,9 @@ class TaskOrchestrator:
 
             except Exception as e:
                 # Task failed
-                logger.error(f"Task {task_id}: Unexpected error: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Task {task_id}: Unexpected error: {str(e)}", exc_info=True
+                )
                 await self._mark_failed(session, task_id, "UNKNOWN", str(e))
 
             finally:
@@ -170,9 +184,7 @@ class TaskOrchestrator:
         await task_service.update_task_progress(
             task_id, "CANCELLED", 100, status="CANCELLED"
         )
-        await task_service.log_event(
-            task_id, "info", "Task was cancelled"
-        )
+        await task_service.log_event(task_id, "CANCELLED", "info", "Task was cancelled")
 
     async def _mark_failed(
         self, session: AsyncSession, task_id: str, stage: str, error: str
@@ -186,7 +198,7 @@ class TaskOrchestrator:
             task_id, stage, 0, status="FAILED", error_message=error
         )
         await task_service.log_event(
-            task_id, "error", f"Task failed at {stage}: {error}"
+            task_id, stage, "error", f"Task failed at {stage}: {error}"
         )
 
     async def _mark_completed(self, session: AsyncSession, task_id: str):
@@ -197,9 +209,7 @@ class TaskOrchestrator:
         await task_service.update_task_progress(
             task_id, "DONE", 100, status="COMPLETED"
         )
-        await task_service.log_event(
-            task_id, "info", "Task completed successfully"
-        )
+        await task_service.log_event(task_id, "DONE", "info", "Task completed successfully")
 
     def get_status(self) -> Dict[str, Any]:
         """

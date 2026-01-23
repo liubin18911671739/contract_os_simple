@@ -1,15 +1,16 @@
 """
 Parse Agent - Extract text from contract files
 """
-from typing import Dict, Any
+
+from typing import Any, Dict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import PrecheckTask, ContractVersion
-from ..services.contract_service import ContractService
-from ..utils.file_parser import parse_file
-from .base import BaseAgent
+from server.database.models import ContractVersion, PrecheckTask
+from server.services.contract_service import ContractService
+from server.utils.file_parser import parse_file
+from server.agents.base import BaseAgent
 
 
 class ParseAgent(BaseAgent):
@@ -21,9 +22,7 @@ class ParseAgent(BaseAgent):
         super().__init__(session)
         self.contract_service = ContractService(session)
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse contract file and extract text
 

@@ -2,23 +2,19 @@
 Knowledge Base Service
 Manages KB collections, documents, chunks, and embeddings
 """
+
 import hashlib
 import uuid
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import (
-    KBCollection,
-    KBDocument,
-    KBChunk,
-    KBEmbedding,
-)
-from ..config import settings, get_storage_path
-from .llm_service import get_llm_service
+from ..config import get_storage_path, settings
+from ..database.models import KBChunk, KBCollection, KBDocument, KBEmbedding
 from ..utils.vector_store import get_vector_store
+from .llm_service import get_llm_service
 
 
 class KBService:
@@ -237,9 +233,7 @@ class KBService:
 
         return doc_id
 
-    def _split_text(
-        self, text: str, chunk_size: int, chunk_overlap: int
-    ) -> List[str]:
+    def _split_text(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
         """Split text into chunks"""
         chunks = []
         start = 0
@@ -327,8 +321,8 @@ class KBService:
         if not chunk_ids:
             return []
 
-        query = select(KBChunk).where(KBChunk.id.in_(chunk_ids))
-        result = await self.session.execute(query)
+        stmt = select(KBChunk).where(KBChunk.id.in_(chunk_ids))
+        result = await self.session.execute(stmt)
         chunks = result.scalars().all()
 
         # Build response
@@ -338,12 +332,14 @@ class KBService:
         for chunk_id, score in results:
             if chunk_id in chunk_map:
                 chunk = chunk_map[chunk_id]
-                output.append({
-                    "chunk_id": chunk.id,
-                    "text": chunk.text,
-                    "score": score,
-                    "meta": chunk.meta_json,
-                })
+                output.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "text": chunk.text,
+                        "score": score,
+                        "meta": chunk.meta_json,
+                    }
+                )
 
         return output
 

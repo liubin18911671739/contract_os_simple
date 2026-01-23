@@ -1,6 +1,7 @@
 """
 Configuration management for Contract OS Simple
 """
+
 import os
 from pathlib import Path
 from typing import List, Optional

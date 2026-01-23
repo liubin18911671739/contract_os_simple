@@ -1,8 +1,10 @@
 """
 Tests for Agent classes
 """
-import pytest
+
 import uuid
+
+import pytest
 
 from server.agents.stub_agents import RulesAgent
 
@@ -10,10 +12,8 @@ from server.agents.stub_agents import RulesAgent
 @pytest.mark.asyncio
 async def test_rules_agent(test_db):
     """Test RulesAgent keyword matching"""
-    from server.database.models import (
-        PrecheckTask, ContractVersion, ConfigSnapshot,
-        Clause, Contract
-    )
+    from server.database.models import (Clause, ConfigSnapshot, Contract,
+                                        ContractVersion, PrecheckTask)
 
     # Setup contract
     contract_id = f"contract_{uuid.uuid4().hex[:12]}"
@@ -94,4 +94,3 @@ async def test_rules_agent(test_db):
     assert "rule_hits_count" in result
     # Should find "unlimited liability" and "automatically renew"
     assert result["rule_hits_count"] >= 2
-

@@ -3,10 +3,11 @@ Performance Benchmarks for Contract OS Simple
 
 This module provides benchmarking utilities to measure system performance.
 """
+
 import asyncio
 import time
-from typing import Dict, Any, List
 from pathlib import Path
+from typing import Any, Dict, List
 
 
 class BenchmarkResult:
@@ -142,9 +143,9 @@ async def benchmark_task_processing(
     results["metrics"]["report_generation"] = result.duration
 
     # Calculate total estimated time
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Summary")
-    print("="*60)
+    print("=" * 60)
 
     # Estimate end-to-end time per task
     query_time = results["metrics"]["db_query_100"] / 100 * clauses_per_task
@@ -164,7 +165,9 @@ async def benchmark_task_processing(
 
     print(f"\nWith 3 concurrent tasks:")
     print(f"  - Throughput: {3 / total_per_task:.2f} tasks/second")
-    print(f"  - Estimated time for {num_tasks} tasks: {(num_tasks / 3) * total_per_task:.1f}s")
+    print(
+        f"  - Estimated time for {num_tasks} tasks: {(num_tasks / 3) * total_per_task:.1f}s"
+    )
 
     results["metrics"]["total_per_task"] = total_per_task
     results["metrics"]["throughput_per_second"] = 3 / total_per_task
@@ -208,9 +211,9 @@ def benchmark_query_performance() -> Dict[str, Any]:
 
 async def run_all_benchmarks():
     """Run all performance benchmarks"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("CONTRACT OS SIMPLE - PERFORMANCE BENCHMARKS")
-    print("="*60)
+    print("=" * 60)
 
     # Task processing benchmark
     task_results = await benchmark_task_processing(
@@ -228,9 +231,9 @@ async def run_all_benchmarks():
         "query_performance": query_results,
     }
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Benchmark Complete!")
-    print("="*60)
+    print("=" * 60)
 
     return results
 

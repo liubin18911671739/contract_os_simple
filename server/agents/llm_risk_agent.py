@@ -1,20 +1,20 @@
 """
 LLM Risk Agent - Analyze risks using LLM
 """
+
 import json
 import logging
 import uuid
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.models import Clause, Risk, KBCitation
-from ..database.connection import fetch_all_sql
-from ..services.llm_service import get_llm_service
-from ..services.kb_service import KBService
-from .base import BaseAgent
-
+from server.database.connection import fetch_all_sql
+from server.database.models import Clause, KBCitation, Risk
+from server.services.kb_service import KBService
+from server.services.llm_service import get_llm_service
+from server.agents.base import BaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,7 @@ class LLMRiskAgent(BaseAgent):
         super().__init__(session)
         self.llm_service = get_llm_service()
 
-    async def execute(
-        self, task_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze risks for each clause using LLM
 
@@ -42,15 +40,21 @@ class LLMRiskAgent(BaseAgent):
             Dict with risk count
         """
         # Get all clauses for this task
-        query = select(Clause).where(Clause.task_id == task_id).order_by(Clause.order_no)
+        query = (
+            select(Clause).where(Clause.task_id == task_id).order_by(Clause.order_no)
+        )
         result = await self.session.execute(query)
         clauses = result.scalars().all()
 
-        logger.info(f"Task {task_id}: Starting LLM risk analysis for {len(clauses)} clauses")
+        logger.info(
+            f"Task {task_id}: Starting LLM risk analysis for {len(clauses)} clauses"
+        )
         risks_created = []
 
         for i, clause in enumerate(clauses, 1):
-            logger.debug(f"Task {task_id}: Processing clause {i}/{len(clauses)} - {clause.clause_id}")
+            logger.debug(
+                f"Task {task_id}: Processing clause {i}/{len(clauses)} - {clause.clause_id}"
+            )
             # Check for cancellation
             if await self.check_cancelled(task_id):
                 break
@@ -67,7 +71,9 @@ class LLMRiskAgent(BaseAgent):
                 (task_id, clause.clause_id),
             )
 
-            logger.debug(f"Task {task_id}: Clause {i}/{len(clauses)} - {len(kb_hits)} KB hits found")
+            logger.debug(
+                f"Task {task_id}: Clause {i}/{len(clauses)} - {len(kb_hits)} KB hits found"
+            )
 
             # Build prompt
             system_prompt = self._get_system_prompt()
@@ -85,7 +91,9 @@ class LLMRiskAgent(BaseAgent):
 
                 # Parse risks
                 risks = response.get("risks", [])
-                logger.debug(f"Task {task_id}: Clause {i}/{len(clauses)} - {len(risks)} risks identified")
+                logger.debug(
+                    f"Task {task_id}: Clause {i}/{len(clauses)} - {len(risks)} risks identified"
+                )
 
                 for risk_data in risks:
                     risk_id = f"risk_{uuid.uuid4().hex[:12]}"
@@ -118,11 +126,16 @@ class LLMRiskAgent(BaseAgent):
                         self.session.add(citation)
 
                 await self.session.commit()
-                logger.debug(f"Task {task_id}: Clause {i}/{len(clauses)} - {len(risks)} risks saved to database")
+                logger.debug(
+                    f"Task {task_id}: Clause {i}/{len(clauses)} - {len(risks)} risks saved to database"
+                )
 
             except Exception as e:
                 # Create NEEDS_REVIEW risk when LLM fails
-                logger.error(f"Task {task_id}: Clause {i}/{len(clauses)} - LLM analysis failed: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Task {task_id}: Clause {i}/{len(clauses)} - LLM analysis failed: {str(e)}",
+                    exc_info=True,
+                )
                 risk_id = f"risk_{uuid.uuid4().hex[:12]}"
                 risk = Risk(
                     id=risk_id,
@@ -139,14 +152,16 @@ class LLMRiskAgent(BaseAgent):
                 self.session.add(risk)
                 await self.session.commit()
                 risks_created.append(risk_id)
-                logger.info(f"Task {task_id}: Clause {i}/{len(clauses)} - Created NEEDS_REVIEW risk for LLM error")
+                logger.info(
+                    f"Task {task_id}: Clause {i}/{len(clauses)} - Created NEEDS_REVIEW risk for LLM error"
+                )
 
-        logger.info(f"Task {task_id}: LLM risk analysis completed - {len(risks_created)} risks created")
+        logger.info(
+            f"Task {task_id}: LLM risk analysis completed - {len(risks_created)} risks created"
+        )
         await self.update_progress(task_id, 75)
 
-        await self.log_event(
-            task_id, "info", f"Created {len(risks_created)} risks"
-        )
+        await self.log_event(task_id, "info", f"Created {len(risks_created)} risks")
 
         return {"risk_count": len(risks_created)}
 

@@ -1,8 +1,10 @@
 """
 Health check routes
 """
-from fastapi import APIRouter
+
 from datetime import datetime
+
+from fastapi import APIRouter
 
 from ..schemas.pydantic_models import HealthResponse
 

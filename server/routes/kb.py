@@ -1,17 +1,16 @@
 """
 Knowledge Base routes
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+
+from fastapi import (APIRouter, Depends, File, HTTPException, Request,
+                     UploadFile)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database.connection import get_session
-from ..schemas.pydantic_models import (
-    CreateKBCollectionRequest,
-    KBCollectionResponse,
-    SuccessResponse,
-)
+from ..rate_limit import RATE_LIMITS, limiter
+from ..schemas.pydantic_models import (CreateKBCollectionRequest,
+                                       KBCollectionResponse, SuccessResponse)
 from ..services.kb_service import KBService
-from ..rate_limit import limiter, RATE_LIMITS
 
 router = APIRouter(prefix="/api/kb", tags=["knowledge-base"])
 
@@ -43,9 +42,7 @@ async def list_collections(
     """List KB collections"""
     kb_service = KBService(session)
 
-    collections = await kb_service.list_collections(
-        scope=scope, is_enabled=is_enabled
-    )
+    collections = await kb_service.list_collections(scope=scope, is_enabled=is_enabled)
 
     return collections
 

@@ -1,6 +1,7 @@
 """
 Test configuration and fixtures
 """
+
 import asyncio
 import os
 import sys
@@ -8,7 +9,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
 
 # Set test environment variables BEFORE importing server modules
 os.environ.setdefault("ZHIPU_API_KEY", "test_key_for_unit_tests")
@@ -21,8 +23,8 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from server.database.models import Base
 from server.config import Settings
+from server.database.models import Base
 
 
 @pytest.fixture(scope="function")
