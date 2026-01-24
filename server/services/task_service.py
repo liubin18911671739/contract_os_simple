@@ -54,6 +54,7 @@ class TaskService:
             kb_collection_versions_json={col_id: 1 for col_id in kb_collection_ids},
         )
         self.session.add(config_snapshot)
+        await self.session.flush()  # Flush to ensure config_snapshot gets its ID
 
         # Create task
         task_id = f"task_{uuid.uuid4().hex[:12]}"
@@ -164,6 +165,8 @@ class TaskService:
         Returns:
             Dict with tasks, total, page, limit
         """
+        from sqlalchemy.orm import selectinload
+
         # Count query
         count_query = select(func.count(PrecheckTask.id))
         if status:
@@ -172,22 +175,14 @@ class TaskService:
         count_result = await self.session.execute(count_query)
         total = count_result.scalar()
 
-        # Main query
+        # Main query with eager loading to avoid MissingGreenlet issues
         query = (
-            select(
-                PrecheckTask.id,
-                PrecheckTask.status,
-                PrecheckTask.progress,
-                PrecheckTask.current_stage,
-                PrecheckTask.created_at,
-                PrecheckTask.updated_at,
-                Contract.contract_name,
+            select(PrecheckTask)
+            .options(
+                selectinload(PrecheckTask.contract_version).selectinload(
+                    ContractVersion.contract
+                )
             )
-            .select_from(PrecheckTask)
-            .join(
-                ContractVersion, PrecheckTask.contract_version_id == ContractVersion.id
-            )
-            .join(Contract, ContractVersion.contract_id == Contract.id)
         )
 
         if status:
@@ -205,20 +200,29 @@ class TaskService:
         query = query.limit(limit).offset(offset)
 
         result = await self.session.execute(query)
-        rows = result.all()
+        task_objects = result.scalars().all()
 
-        tasks = [
-            {
-                "id": row[0],
-                "status": row[1],
-                "progress": row[2],
-                "current_stage": row[3],
-                "created_at": row[4].isoformat(),
-                "updated_at": row[5].isoformat(),
-                "contract_name": row[6],
-            }
-            for row in rows
-        ]
+        # Build response
+        tasks = []
+        for task in task_objects:
+            contract_name = "Unknown"
+            if task.contract_version and task.contract_version.contract:
+                contract_name = task.contract_version.contract.contract_name
+
+            tasks.append(
+                {
+                    "id": task.id,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "current_stage": task.current_stage,
+                    "created_at": task.created_at.isoformat(),
+                    "updated_at": task.updated_at.isoformat(),
+                    "contract_name": contract_name,
+                    "error_message": task.error_message,
+                    "cancel_requested": task.cancel_requested or False,
+                    "kb_mode": task.kb_mode or "STRICT",
+                }
+            )
 
         return {
             "tasks": tasks,
@@ -425,12 +429,13 @@ class TaskService:
             for row in rows
         ]
 
-    async def delete_task(self, task_id: str) -> bool:
+    async def delete_task(self, task_id: str, force: bool = False) -> bool:
         """
         Delete a task and all its related data
 
         Args:
             task_id: Task ID to delete
+            force: If True, skip running task check and attempt to cancel
 
         Returns:
             True if deleted, False if not found
@@ -444,15 +449,24 @@ class TaskService:
 
         # Check if task is running
         if task.status in ("QUEUED", "PROCESSING"):
-            raise ValueError("Cannot delete a running task. Cancel it first.")
+            if not force:
+                raise ValueError(
+                    "Cannot delete a running task. Use force=True to cancel and delete."
+                )
+            # Try to cancel the task first
+            task.cancel_requested = True
+            await self.session.commit()
+
+        # Store config snapshot id before deletion
+        config_snapshot_id = task.config_snapshot_id
 
         # Delete in order of dependencies (child records first)
-        # 1. Delete KB citations
+        # 1. Delete KB snapshots
         await self.session.execute(
             sql_delete(TaskKBSnapshot).where(TaskKBSnapshot.task_id == task_id)
         )
 
-        # 2. Delete rule hits (cascade should handle this, but being explicit)
+        # 2. Delete rule hits
         from ..database.models import RuleHit
 
         await self.session.execute(
@@ -468,7 +482,16 @@ class TaskService:
             sql_delete(KBHitTemp).where(KBHitTemp.task_id == task_id)
         )
 
-        # 4. Delete evidences
+        # 4. Delete KB citations
+        from ..database.models import KBCitation
+
+        await self.session.execute(
+            sql_delete(KBCitation).where(KBCitation.risk_id.in_(
+                select(Risk.id).where(Risk.task_id == task_id)
+            ))
+        )
+
+        # 5. Delete evidences
         from ..database.models import Evidence
 
         await self.session.execute(
@@ -477,38 +500,43 @@ class TaskService:
             ))
         )
 
-        # 5. Delete risks
+        # 6. Delete risks
         await self.session.execute(
             sql_delete(Risk).where(Risk.task_id == task_id)
         )
 
-        # 6. Delete clauses
+        # 7. Delete clauses
         await self.session.execute(
             sql_delete(Clause).where(Clause.task_id == task_id)
         )
 
-        # 7. Delete task events
+        # 8. Delete task events
         await self.session.execute(
             sql_delete(TaskEvent).where(TaskEvent.task_id == task_id)
         )
 
-        # 8. Delete reviews
+        # 9. Delete reviews
         from ..database.models import Review
 
         await self.session.execute(
             sql_delete(Review).where(Review.task_id == task_id)
         )
 
-        # 9. Delete config snapshot
-        if task.config_snapshot_id:
-            config_snapshot = await self.session.get(
-                ConfigSnapshot, task.config_snapshot_id
-            )
-            if config_snapshot:
-                await self.session.delete(config_snapshot)
+        # 10. Delete the task using raw SQL to avoid ORM cascade issues
+        await self.session.execute(
+            sql_delete(PrecheckTask).where(PrecheckTask.id == task_id)
+        )
 
-        # 10. Finally delete the task
-        await self.session.delete(task)
         await self.session.commit()
+
+        # 11. Delete config snapshot after task is deleted (using a new session to avoid issues)
+        if config_snapshot_id:
+            from ..database.connection import get_session_maker
+            session_maker = get_session_maker()
+            async with session_maker() as new_session:
+                config_snapshot = await new_session.get(ConfigSnapshot, config_snapshot_id)
+                if config_snapshot:
+                    await new_session.delete(config_snapshot)
+                    await new_session.commit()
 
         return True

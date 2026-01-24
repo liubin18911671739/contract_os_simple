@@ -177,6 +177,7 @@ Key endpoints:
 - `GET /api/precheck-tasks/{id}` - Returns task with progress %
 - `GET /api/precheck-tasks/{id}/clauses` - Returns clauses with risk info
 - `GET /api/precheck-tasks/{id}/events` - Event log for debugging
+- `DELETE /api/precheck-tasks/{id}?force=true` - Delete task (force=true cancels running tasks)
 
 ## Configuration
 
@@ -186,6 +187,9 @@ Environment variables in `.env`:
 - `STORAGE_ROOT` - File storage root
 - `MAX_CONCURRENT_TASKS` - Max parallel tasks (default: 3)
 - `MAX_API_CONCURRENT` - Max parallel API calls (default: 5)
+- `TASK_TIMEOUT` - Seconds before stuck task is marked failed (default: 1800)
+- `TASK_RECOVERY_INTERVAL` - Seconds between stuck task scans (default: 600)
+- `TASK_STARTUP_RECOVERY` - Enable startup recovery of stuck tasks (default: true)
 
 Configuration loaded via `pydantic-settings` in `server/config.py`.
 
@@ -223,6 +227,30 @@ File parsing (`server/utils/file_parser.py`):
 5. **Vector Indexes**: Call `vector_store.save()` after modifying Faiss indexes
 6. **Type Hints**: All functions use Python 3.11+ union syntax (`str | None`)
 
+### Critical: Clause.id vs Clause.clause_id
+
+The `Clause` model has TWO id fields that are easily confused:
+- `Clause.id` - The **primary key** (foreign key target for `risks.clause_id`, `kb_hits_temp.clause_id`)
+- `Clause.clause_id` - A **business ID** for display purposes (like `clause_abc123`)
+
+**Always use `clause.id`** when creating foreign key relationships:
+```python
+# CORRECT - uses clause.id (PK)
+risk = Risk(clause_id=clause.id, ...)
+hit = KBHitTemp(clause_id=clause.id, ...)
+
+# WRONG - causes foreign key constraint errors
+risk = Risk(clause_id=clause.clause_id, ...)
+```
+
+### Task Deletion and Cancellation
+
+The orchestrator supports force-deleting running tasks:
+- `DELETE /api/precheck-tasks/{task_id}?force=true` - Cancels and deletes a running task
+- The orchestrator tracks deleted tasks in `deleted_tasks` set to prevent DB updates after deletion
+- Agents should call `await self.check_cancelled()` periodically to respect cancellation
+- `TaskCancelledException` is raised when a task is cancelled mid-stage
+
 ## Common Issues
 
 - **SQLite locked**: Ensure WAL mode enabled (check `connection.py`)
@@ -230,6 +258,7 @@ File parsing (`server/utils/file_parser.py`):
 - **LLM rate limits**: Adjust `MAX_API_CONCURRENT` in `.env`
 - **Faiss import issues**: Verify numpy version compatibility
 - **Agent stuck**: Check event logs via `task_events` table
+- **Stuck tasks**: Server restart triggers automatic recovery of tasks stuck >30 minutes (configurable via `TASK_TIMEOUT`)
 
 ## Testing Configuration
 

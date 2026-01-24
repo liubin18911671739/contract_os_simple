@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Seed script to create sample KB collections and documents
+Seed Knowledge Base Script
+Populates the KB with sample legal documents from test-data
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -10,184 +12,272 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from server.database.connection import get_session_maker, init_db
+from sqlalchemy import func, select
+from server.database.connection import get_session_maker
+from server.database.models import KBCollection, KBChunk, KBDocument, KBEmbedding
 from server.services.kb_service import KBService
+from server.utils.file_parser import parse_file
 
 
-async def main():
-    """Seed KB with sample data"""
-    print("Checking database...")
+# Default KB collections to create
+DEFAULT_COLLECTIONS = [
+    {
+        "name": "合同法律法规",
+        "scope": "GLOBAL",
+        "description": "中国合同相关法律法规知识库",
+    },
+    {
+        "name": "标准合同模板",
+        "scope": "GLOBAL",
+        "description": "各类标准合同模板参考",
+    },
+    {
+        "name": "风险检查规则",
+        "scope": "GLOBAL",
+        "description": "合同风险检查规则和指南",
+    },
+]
 
-    session_maker = get_session_maker()
+# Sample documents to import (relative to test-data/contracts)
+SAMPLE_DOCUMENTS = [
+    {
+        "collection": "合同法律法规",
+        "title": "劳动合同法相关条款",
+        "doc_type": "regulation",
+        "files": ["劳动合同.txt"],
+    },
+    {
+        "collection": "标准合同模板",
+        "title": "技术服务合同模板",
+        "doc_type": "template",
+        "files": ["技术服务合同.txt"],
+    },
+    {
+        "collection": "标准合同模板",
+        "title": "销售合同模板",
+        "doc_type": "template",
+        "files": ["销售合同.txt"],
+    },
+    {
+        "collection": "标准合同模板",
+        "title": "保密协议模板",
+        "doc_type": "template",
+        "files": ["保密协议.txt"],
+    },
+]
+
+
+async def create_default_collections(session_maker) -> dict:
+    """
+    Create default KB collections
+
+    Returns:
+        Dict mapping collection names to IDs
+    """
+    print("Creating default KB collections...")
+
+    collection_map = {}
 
     async with session_maker() as session:
         kb_service = KBService(session)
 
-        # Check if collections already exist
-        existing_collections = await kb_service.list_collections()
-        existing_names = {col["name"] for col in existing_collections}
-
-        # Create sample collections
-        print("\nCreating KB collections...")
-
-        # Contract regulations collection
-        if "Contract Regulations" in existing_names:
-            # Get existing collection
-            reg_col_id = next(col["id"] for col in existing_collections if col["name"] == "Contract Regulations")
-            print(f"✓ Already exists: Contract Regulations ({reg_col_id})")
-        else:
-            reg_col_id = await kb_service.create_collection(
-                name="Contract Regulations",
-                scope="GLOBAL"
+        for col_config in DEFAULT_COLLECTIONS:
+            # Check if collection already exists
+            existing = await session.execute(
+                select(KBCollection).where(KBCollection.name == col_config["name"])
             )
-            print(f"✓ Created: Contract Regulations ({reg_col_id})")
+            existing_col = existing.scalar_one_or_none()
 
-        # Best practices collection
-        if "Contract Best Practices" in existing_names:
-            bp_col_id = next(col["id"] for col in existing_collections if col["name"] == "Contract Best Practices")
-            print(f"✓ Already exists: Contract Best Practices ({bp_col_id})")
-        else:
-            bp_col_id = await kb_service.create_collection(
-                name="Contract Best Practices",
-                scope="GLOBAL"
+            if existing_col:
+                print(f"  - Collection '{col_config['name']}' already exists (ID: {existing_col.id})")
+                collection_map[col_config["name"]] = existing_col.id
+            else:
+                col_id = await kb_service.create_collection(
+                    name=col_config["name"],
+                    scope=col_config["scope"],
+                )
+                print(f"  + Created collection: {col_config['name']} (ID: {col_id})")
+                collection_map[col_config["name"]] = col_id
+
+    return collection_map
+
+
+async def import_documents(session_maker, collection_map: dict, test_data_dir: Path):
+    """
+    Import sample documents into KB collections
+
+    Args:
+        session_maker: Database session maker
+        collection_map: Dict mapping collection names to IDs
+        test_data_dir: Path to test-data directory
+    """
+    print("\nImporting sample documents...")
+
+    contracts_dir = test_data_dir / "contracts"
+
+    if not contracts_dir.exists():
+        print(f"  Warning: Contracts directory not found: {contracts_dir}")
+        return
+
+    async with session_maker() as session:
+        kb_service = KBService(session)
+
+        for doc_config in SAMPLE_DOCUMENTS:
+            collection_name = doc_config["collection"]
+            collection_id = collection_map.get(collection_name)
+
+            if not collection_id:
+                print(f"  - Skipping '{doc_config['title']}': Collection '{collection_name}' not found")
+                continue
+
+            for filename in doc_config["files"]:
+                file_path = contracts_dir / filename
+
+                if not file_path.exists():
+                    print(f"  - File not found: {filename}")
+                    continue
+
+                # Determine MIME type from extension
+                ext = file_path.suffix.lower()
+                mime_map = {
+                    ".txt": "text/plain",
+                    ".md": "text/plain",
+                    ".pdf": "application/pdf",
+                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }
+                content_type = mime_map.get(ext, "text/plain")
+
+                # Read and parse file
+                try:
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+
+                    text = parse_file(content, content_type)
+
+                    if not text or not text.strip():
+                        print(f"  - Skipping '{filename}': No text content")
+                        continue
+
+                    # Import to KB
+                    doc_id = await kb_service.import_text(
+                        collection_id=collection_id,
+                        title=f"{doc_config['title']} - {filename}",
+                        doc_type=doc_config["doc_type"],
+                        text=text,
+                        object_key=f"test-data/contracts/{filename}",
+                    )
+
+                    print(f"  + Imported: {filename} -> {collection_name} (chunks: ~{len(text) // 500})")
+
+                except Exception as e:
+                    print(f"  - Failed to import '{filename}': {e}")
+
+
+async def show_kb_status(session_maker):
+    """Display current KB status"""
+    print("\n" + "=" * 50)
+    print("Knowledge Base Status")
+    print("=" * 50)
+
+    async with session_maker() as session:
+        # Count collections
+        collections_result = await session.execute(select(func.count(KBCollection.id)))
+        collection_count = collections_result.scalar() or 0
+
+        # Count documents
+        docs_result = await session.execute(select(func.count(KBDocument.id)))
+        doc_count = docs_result.scalar() or 0
+
+        # Count chunks
+        chunks_result = await session.execute(select(func.count(KBChunk.id)))
+        chunk_count = chunks_result.scalar() or 0
+
+        # Count indexed chunks
+        indexed_result = await session.execute(select(func.count(KBEmbedding.chunk_id)))
+        indexed_count = indexed_result.scalar() or 0
+
+        print(f"\nCollections: {collection_count}")
+        print(f"Documents:   {doc_count}")
+        print(f"Chunks:      {chunk_count}")
+        print(f"Indexed:     {indexed_count}")
+
+        # List collections with document counts
+        print("\nCollections:")
+        collections_query = select(KBCollection).order_by(KBCollection.name)
+        collections = (await session.execute(collections_query)).scalars().all()
+
+        for col in collections:
+            # Count documents in this collection
+            doc_count_query = select(func.count(KBDocument.id)).where(
+                KBDocument.collection_id == col.id
             )
-            print(f"✓ Created: Contract Best Practices ({bp_col_id})")
+            col_doc_count = (await session.execute(doc_count_query)).scalar() or 0
 
-        # Create sample documents
-        print("\nImporting sample documents...")
-        print("Note: If API quota is exceeded, collections will be created without embeddings.")
-
-        try:
-            # Create a sample regulation document
-            sample_reg_path = Path(__file__).parent / "sample_regulation.txt"
-            sample_reg_path.write_text("""
-# Contract Risk Regulations
-
-## 1. Liability Limitations
-
-Contracts should always include liability limitations. Unlimited liability clauses pose significant risks to both parties.
-
-### Key Points:
-- Liability should be capped at contract value or a multiple thereof
-- Consequential damages should be excluded
-- No liability for indirect or punitive damages
-
-## 2. Termination Rights
-
-Fair termination provisions are essential for contract flexibility.
-
-### Best Practices:
-- Allow termination for cause with notice period
-- Include termination for convenience with reasonable fees
-- Define cure periods for breaches
-
-## 3. Payment Terms
-
-Clear payment terms prevent disputes and cash flow issues.
-
-### Recommendations:
-- Specify payment due dates clearly
-- Include late payment penalties
-- Define payment methods and currency
-
-## 4. Confidentiality
-
-Protect sensitive information with proper confidentiality clauses.
-
-### Required Elements:
-- Define what constitutes confidential information
-- Specify permitted uses and disclosure
-- Set duration of confidentiality obligations
-
-## 5. Dispute Resolution
-
-Efficient dispute resolution saves time and costs.
-
-### Options to Consider:
-- Mediation as first step
-- Arbitration clauses with specified rules
-- Governing law and jurisdiction
-            """.strip())
-
-            await kb_service.import_document(
-                collection_id=reg_col_id,
-                title="General Contract Risk Regulations",
-                doc_type="regulation",
-                file_path=str(sample_reg_path),
+            # Count indexed chunks in this collection
+            chunk_count_query = (
+                select(func.count(KBChunk.id))
+                .join(KBEmbedding, KBChunk.id == KBEmbedding.chunk_id)
+                .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                .where(KBDocument.collection_id == col.id)
             )
-            print(f"✓ Imported: General Contract Risk Regulations")
+            col_indexed = (await session.execute(chunk_count_query)).scalar() or 0
 
-            # Create a sample best practices document
-            sample_bp_path = Path(__file__).parent / "sample_practices.txt"
-            sample_bp_path.write_text("""
-# Contract Review Best Practices
+            status = "✓" if col_indexed > 0 else "○"
+            print(f"  [{status}] {col.name}: {col_doc_count} docs, ~{col_indexed} indexed chunks")
 
-## Risk Assessment Framework
+    print("=" * 50)
 
-When reviewing contracts, assess risks in three categories:
 
-### HIGH Risk Items
-- Unlimited liability clauses
-- Unfair termination provisions
-- Automatic renewal without notice
-- Unclear payment terms
-- Missing dispute resolution
+async def main():
+    """Main entry point"""
+    import argparse
 
-### MEDIUM Risk Items
-- Long notice periods
-- Restrictive confidentiality terms
-- One-sided indemnification
-- Vague deliverables
+    parser = argparse.ArgumentParser(description="Seed knowledge base with sample data")
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Recreate collections if they already exist",
+    )
+    parser.add_argument(
+        "--test-data",
+        type=str,
+        default="test-data",
+        help="Path to test-data directory (default: test-data)",
+    )
+    parser.add_argument(
+        "--status-only",
+        "-s",
+        action="store_true",
+        help="Only show KB status, don't import anything",
+    )
 
-### LOW Risk Items
-- Minor administrative provisions
-- Standard boilerplate language
-- Non-material terms
+    args = parser.parse_args()
 
-## Review Checklist
+    test_data_dir = Path(args.test_data)
 
-Before signing, ensure:
-1. All parties are correctly identified
-2. Scope of work is clearly defined
-3. Payment terms are complete and clear
-4. Liability is appropriately limited
-5. Termination rights are balanced
-6. Confidentiality obligations are reasonable
-7. Dispute resolution is specified
-8. Governing law is appropriate
+    if args.status_only:
+        session_maker = get_session_maker()
+        await show_kb_status(session_maker)
+        return
 
-## Red Flags
+    print("=" * 50)
+    print("KB Seeding Script")
+    print("=" * 50)
+    print(f"Test data directory: {test_data_dir.absolute()}")
 
-Watch out for:
-- "Time is of the essence" without justification
-- Blank spaces for future terms
-- References to undefined documents
-- Unilateral modification rights
-- Waivers of legal rights
-            """.strip())
+    session_maker = get_session_maker()
 
-            await kb_service.import_document(
-                collection_id=bp_col_id,
-                title="Contract Review Best Practices",
-                doc_type="guideline",
-                file_path=str(sample_bp_path),
-            )
-            print(f"✓ Imported: Contract Review Best Practices")
+    # Create collections
+    collection_map = await create_default_collections(session_maker)
 
-            print("\n✓ KB seeding complete!")
-            print(f"\nCollection IDs:")
-            print(f"  - Regulations: {reg_col_id}")
-            print(f"  - Best Practices: {bp_col_id}")
+    # Import documents
+    await import_documents(session_maker, collection_map, test_data_dir)
 
-        except Exception as e:
-            print(f"\n⚠ Warning: Could not import documents (API quota exceeded?)")
-            print(f"  Error: {str(e)}")
-            print(f"\n  Collections created successfully:")
-            print(f"  - Regulations: {reg_col_id}")
-            print(f"  - Best Practices: {bp_col_id}")
-            print(f"\n  You can import documents later via the API or UI.")
-            return
+    # Show status
+    await show_kb_status(session_maker)
+
+    print("\n✓ KB seeding complete!")
 
 
 if __name__ == "__main__":

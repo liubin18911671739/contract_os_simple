@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Trash2 } from 'lucide-react';
 import {
   getTask,
   getTaskSummary,
   getTaskClauses,
   generateReport,
   getReportDownloadUrl,
+  deleteTask,
 } from '../api/tasks';
 import { Button } from '../components/ui/Button';
 import { RiskBadge } from '../components/ui/Badge';
@@ -31,6 +33,7 @@ export default function Results() {
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
@@ -49,6 +52,23 @@ export default function Results() {
       setClauses(clausesData as any[]);
     } catch (error) {
       console.error('Failed to load results:', error);
+    }
+  }
+
+  async function handleDeleteTask() {
+    if (!confirm('确定要删除此任务及其所有相关数据吗？此操作不可恢复。')) return;
+
+    setDeleteLoading(true);
+    try {
+      await deleteTask(taskId!);
+      navigate('/');
+    } catch (error: any) {
+      setReportMessage({
+        type: 'error',
+        text: `删除任务失败: ${error.message || '未知错误'}`,
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -105,6 +125,15 @@ export default function Results() {
               </Button>
             </>
           )}
+          <Button
+            variant="ghost"
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            onClick={handleDeleteTask}
+            disabled={deleteLoading}
+            title="删除任务"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
           <Button variant="ghost" onClick={() => navigate('/')}>
             Back to Dashboard
           </Button>

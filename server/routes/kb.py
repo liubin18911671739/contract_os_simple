@@ -3,6 +3,7 @@ Knowledge Base routes
 """
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -20,8 +21,10 @@ from ..schemas.pydantic_models import (CreateKBCollectionRequest,
                                        KBDocumentResponse, SuccessResponse)
 from ..services.file_service import FileService
 from ..services.kb_service import KBService
+from ..utils.file_parser import parse_file
 
 router = APIRouter(prefix="/api/kb", tags=["knowledge-base"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/collections", status_code=201)
@@ -121,7 +124,7 @@ async def upload_document(
     doc_type: str = Form(default="txt"),
     session: AsyncSession = Depends(get_session),
 ) -> SuccessResponse:
-    """Upload a document to a KB collection"""
+    """Upload a document to a KB collection with automatic chunking and embedding"""
     # Verify collection exists
     collection_result = await session.execute(
         select(KBCollection).where(KBCollection.id == collection_id)
@@ -130,33 +133,68 @@ async def upload_document(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Save file
+    # Read file content
+    content = await file.read()
+
+    # Extract text from file based on content type
+    content_type = file.content_type or ""
+    filename = file.filename or ""
+
+    # Map filename extension to MIME type if content_type is missing
+    if not content_type or content_type == "application/octet-stream":
+        ext = Path(filename).suffix.lower()
+        mime_map = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt": "text/plain",
+            ".md": "text/plain",
+        }
+        content_type = mime_map.get(ext, "text/plain")
+
+    # Parse file content to extract text
+    try:
+        text = parse_file(content, content_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse file: {str(e)}"
+        )
+
+    if not text or not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="No text content found in file"
+        )
+
+    # Optionally save original file
     file_service = FileService()
     file_service.ensure_storage_dirs()
 
-    # Generate unique filename
-    content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()[:16]
-    ext = Path(file.filename or "file").suffix or ".txt"
-    filename = f"{file_hash}{ext}"
+    ext = Path(filename).suffix or ".txt"
+    safe_filename = f"{file_hash}{ext}"
 
-    object_key = file_service.save_file("kb_documents", filename, content)
+    try:
+        object_key = file_service.save_file("kb_documents", safe_filename, content)
+    except Exception as e:
+        logger.error(f"Failed to save KB document file: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save document file: {str(e)}"
+        )
 
-    # Get file hash for database
-    sha256_hash = hashlib.sha256(content).hexdigest()
+    # Use KBService.import_text to handle chunking and embedding
+    kb_service = KBService(session)
 
-    # Create KB document entry
-    doc_id = str(uuid.uuid4())
-    doc = KBDocument(
-        id=doc_id,
+    doc_id = await kb_service.import_text(
         collection_id=collection_id,
         title=title,
         doc_type=doc_type,
+        text=text,
         object_key=object_key,
-        hash=sha256_hash,
     )
-    session.add(doc)
-    await session.commit()
 
     return SuccessResponse(success=True, id=doc_id)
 

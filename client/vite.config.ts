@@ -15,6 +15,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // Increase timeout for long-running requests (LLM analysis can take time)
+        timeout: 300000, // 5 minutes (Vite uses 'timeout', not 'proxyTimeout')
       },
     },
   },

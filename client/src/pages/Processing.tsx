@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { CheckCircle, Loader, Clock, AlertCircle, XCircle, Users, Search, Brain, Shield } from 'lucide-react';
-import { getTask, getTaskEvents } from '../api/tasks';
+import { CheckCircle, Loader, Clock, AlertCircle, XCircle, Users, Search, Brain, Shield, X, Trash2 } from 'lucide-react';
+import { getTask, getTaskEvents, cancelTask, deleteTask } from '../api/tasks';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { ProgressBar } from '../components/ui/Progress';
@@ -29,6 +29,7 @@ const STAGE_LABELS: Record<string, string> = {
   EVIDENCING: '证据收集',
   QCING: '质量检查',
   DONE: '完成',
+  CANCELLED: '已取消',
 };
 
 const AGENTS = [
@@ -68,6 +69,8 @@ export default function Processing() {
   const [task, setTask] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [polling, setPolling] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
@@ -79,12 +82,13 @@ export default function Processing() {
         setEvents(eventsData);
 
         if (
+          taskData.status === 'COMPLETED' ||
           taskData.status === 'DONE' ||
           taskData.status === 'FAILED' ||
           taskData.status === 'CANCELLED'
         ) {
           setPolling(false);
-          if (taskData.status === 'DONE') {
+          if (taskData.status === 'COMPLETED' || taskData.status === 'DONE') {
             setTimeout(() => navigate(`/results/${taskId}`), 2000);
           }
         }
@@ -113,7 +117,10 @@ export default function Processing() {
     if (task.status === 'FAILED' && agent.stages.includes(task.current_stage)) {
       return 'error';
     }
-    if (task.status === 'DONE' || currentStageIndex > agentStageIndex) {
+    if (task.status === 'CANCELLED') {
+      return 'cancelled';
+    }
+    if (task.status === 'COMPLETED' || task.status === 'DONE' || currentStageIndex > agentStageIndex) {
       return 'completed';
     }
     if (agent.stages.includes(task.current_stage)) {
@@ -143,6 +150,13 @@ export default function Processing() {
       return (
         <div className="p-3 bg-red-50 rounded-lg">
           <XCircle className="w-6 h-6 text-red-600" />
+        </div>
+      );
+    }
+    if (status === 'cancelled') {
+      return (
+        <div className="p-3 bg-gray-50 rounded-lg">
+          <XCircle className="w-6 h-6 text-gray-400" />
         </div>
       );
     }
@@ -181,6 +195,8 @@ export default function Processing() {
                       ? 'blue'
                       : status === 'error'
                       ? 'red'
+                      : status === 'cancelled'
+                      ? 'gray'
                       : 'gray'
                   }
                 >
@@ -190,6 +206,8 @@ export default function Processing() {
                     ? '进行中'
                     : status === 'error'
                     ? '失败'
+                    : status === 'cancelled'
+                    ? '已取消'
                     : '等待中'}
                 </Badge>
               </div>
@@ -206,6 +224,48 @@ export default function Processing() {
     );
   };
 
+  const handleCancel = async () => {
+    if (!taskId) return;
+    if (!confirm('确定要取消此任务吗？')) return;
+
+    setCancelling(true);
+    try {
+      await cancelTask(taskId);
+      // Refresh task status
+      const updatedTask = await getTask(taskId);
+      setTask(updatedTask);
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || '取消任务失败';
+      alert(message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleForceDelete = async () => {
+    if (!taskId) return;
+    if (!confirm('此任务正在运行，确定要强制删除吗？此操作将取消任务并删除所有相关数据，不可恢复。')) return;
+
+    setDeleting(true);
+    try {
+      await deleteTask(taskId, true);
+      navigate('/');
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || '删除任务失败';
+      alert(message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const canCancel = () => {
+    return !task.cancel_requested &&
+           task.status !== 'COMPLETED' &&
+           task.status !== 'DONE' &&
+           task.status !== 'FAILED' &&
+           task.status !== 'CANCELLED';
+  };
+
   return (
     <div>
       {/* Header */}
@@ -216,9 +276,33 @@ export default function Processing() {
             任务ID: <span className="font-mono text-sm">{taskId}</span>
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate('/')}>
-          返回控制台
-        </Button>
+        <div className="flex items-center gap-2">
+          {canCancel() && (
+            <Button
+              variant="danger"
+              onClick={handleCancel}
+              disabled={cancelling}
+            >
+              <X className="w-4 h-4 mr-1" />
+              {cancelling ? '取消中...' : '取消任务'}
+            </Button>
+          )}
+          {canCancel() && (
+            <Button
+              variant="ghost"
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-300"
+              onClick={handleForceDelete}
+              disabled={deleting}
+              title="强制删除（取消并删除）"
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              {deleting ? '删除中...' : '强制删除'}
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => navigate('/')}>
+            返回控制台
+          </Button>
+        </div>
       </div>
 
       {/* Overall Progress */}
@@ -229,19 +313,23 @@ export default function Processing() {
             <div className="flex items-center gap-2">
               <Badge
                 color={
-                  task.status === 'DONE'
+                  task.status === 'COMPLETED' || task.status === 'DONE'
                     ? 'emerald'
                     : task.status === 'FAILED'
                     ? 'red'
+                    : task.status === 'CANCELLED'
+                    ? 'gray'
                     : 'blue'
                 }
               >
-                {task.status === 'DONE'
+                {task.status === 'COMPLETED' || task.status === 'DONE'
                   ? '完成'
                   : task.status === 'FAILED'
                   ? '失败'
                   : task.status === 'CANCELLED'
                   ? '已取消'
+                  : task.cancel_requested
+                  ? '取消中'
                   : STAGE_LABELS[task.current_stage] || task.current_stage}
               </Badge>
               <span className="text-sm font-medium text-gray-700">{task.progress}%</span>
@@ -250,7 +338,7 @@ export default function Processing() {
           <ProgressBar progress={task.progress} />
           <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
             <span>开始时间: {new Date(task.created_at).toLocaleString('zh-CN')}</span>
-            {task.status === 'DONE' && (
+            {(task.status === 'COMPLETED' || task.status === 'DONE') && (
               <span>完成时间: {new Date(task.updated_at).toLocaleString('zh-CN')}</span>
             )}
           </div>
@@ -278,6 +366,21 @@ export default function Processing() {
         </Card>
       )}
 
+      {/* Cancelled Message */}
+      {task.status === 'CANCELLED' && (
+        <Card className="border-l-4 border-l-gray-500 mb-8">
+          <CardBody>
+            <div className="flex items-start gap-3">
+              <XCircle className="w-6 h-6 text-gray-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-1">任务已取消</h4>
+                <p className="text-sm text-gray-700">此任务已被用户取消</p>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       {/* Activity Log */}
       <Card>
         <CardHeader>
@@ -290,7 +393,11 @@ export default function Processing() {
             ) : (
               events.map((event) => (
                 <div key={event.id} className="flex items-start gap-3 text-sm">
-                  <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-accent" />
+                  <div className={`flex-shrink-0 w-2 h-2 mt-2 rounded-full ${
+                    event.level === 'error' ? 'bg-red-500' :
+                    event.level === 'warning' ? 'bg-amber-500' :
+                    'bg-accent'
+                  }`} />
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-gray-900">{STAGE_LABELS[event.stage] || event.stage}</span>
@@ -308,7 +415,7 @@ export default function Processing() {
       </Card>
 
       {/* Navigation to Results */}
-      {task.status === 'DONE' && (
+      {(task.status === 'COMPLETED' || task.status === 'DONE') && (
         <div className="mt-8 text-center">
           <p className="text-gray-600 mb-4">分析完成！正在跳转到结果页面...</p>
           <Button onClick={() => navigate(`/results/${taskId}`)}>查看结果</Button>

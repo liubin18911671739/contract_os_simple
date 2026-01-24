@@ -3,6 +3,8 @@ Stub Agents for remaining stages
 These can be expanded later with full implementations
 """
 
+import logging
+import time
 import uuid
 from typing import Any, Dict, List
 
@@ -15,6 +17,8 @@ from server.database.models import (Clause, Evidence, KBHitTemp, Review,
 from server.services.kb_service import KBService
 from server.services.llm_service import get_llm_service
 from server.agents.base import BaseAgent
+
+logger = logging.getLogger(__name__)
 
 
 class RulesAgent(BaseAgent):
@@ -115,13 +119,9 @@ class KBRetrievalAgent(BaseAgent):
 
     async def execute(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve KB documents for each clause"""
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Get KB collections for this task
         from server.services.task_service import TaskService
 
+        stage_start = time.time()
         task_service = TaskService(self.session)
 
         try:
@@ -129,6 +129,11 @@ class KBRetrievalAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"Failed to get KB collections for task {task_id}: {e}")
             collection_ids = []
+
+        logger.info(
+            f"Task {task_id}: Starting KB_RETRIEVAL stage with "
+            f"{len(collection_ids)} collections"
+        )
 
         # Early return if no collections configured
         if not collection_ids:
@@ -157,18 +162,22 @@ class KBRetrievalAgent(BaseAgent):
         kb_hits_count = 0
         errors_count = 0
         collections_processed = set()
+        collection_stats = {col_id: {"searches": 0, "hits": 0} for col_id in collection_ids}
 
         for clause_idx, clause in enumerate(clauses):
             # Log progress for long-running tasks
             if clause_idx > 0 and clause_idx % 5 == 0:
-                await self.log_event(
-                    task_id,
-                    "info",
-                    f"KB retrieval progress: {clause_idx}/{len(clauses)} clauses processed",
+                progress_pct = int(37 + 13 * clause_idx / len(clauses))
+                await self.update_progress(task_id, progress_pct)
+                logger.debug(
+                    f"Task {task_id}: KB retrieval progress {clause_idx}/{len(clauses)} clauses"
                 )
+
+            clause_text_preview = clause.text[:60] + "..." if len(clause.text) > 60 else clause.text
 
             for collection_id in collection_ids:
                 collection_key = f"{collection_id}"
+                collection_stats[collection_id]["searches"] += 1
 
                 try:
                     # Search KB
@@ -184,9 +193,8 @@ class KBRetrievalAgent(BaseAgent):
                             )
                         except Exception as e:
                             logger.warning(
-                                f"Rerank failed for task {task_id}, clause {clause.clause_id}: {e}. Using search results."
+                                f"Task {task_id}: Rerank failed for clause {clause.clause_id}: {e}"
                             )
-                            # Continue with search results without reranking
 
                     # Store hits
                     for chunk in chunks:
@@ -194,7 +202,7 @@ class KBRetrievalAgent(BaseAgent):
                         hit = KBHitTemp(
                             id=hit_id,
                             task_id=task_id,
-                            clause_id=clause.clause_id,
+                            clause_id=clause.id,  # Use clause.id (PK), not clause.clause_id
                             chunk_id=chunk["chunk_id"],
                             score=chunk.get("_rerank_score", chunk["score"]),
                             quote_text=chunk["text"][:500],
@@ -205,12 +213,13 @@ class KBRetrievalAgent(BaseAgent):
                         self.session.add(hit)
                         kb_hits_count += 1
                         collections_processed.add(collection_key)
+                        collection_stats[collection_id]["hits"] += 1
 
                 except RuntimeError as e:
                     # LLM API errors (embedding failure, etc.)
                     errors_count += 1
                     logger.error(
-                        f"KB search failed for task {task_id}, collection {collection_id}: {e}"
+                        f"Task {task_id}: KB search failed for collection {collection_id}: {e}"
                     )
                     await self.log_event(
                         task_id,
@@ -221,16 +230,33 @@ class KBRetrievalAgent(BaseAgent):
                 except Exception as e:
                     errors_count += 1
                     logger.error(
-                        f"Unexpected error in KB retrieval for task {task_id}: {e}"
+                        f"Task {task_id}: Unexpected error in KB retrieval: {e}",
+                        exc_info=True,
                     )
-                    # Continue processing
 
         try:
             await self.session.commit()
         except Exception as e:
-            logger.error(f"Failed to commit KB hits for task {task_id}: {e}")
+            logger.error(f"Task {task_id}: Failed to commit KB hits: {e}")
             await self.session.rollback()
             raise
+
+        stage_elapsed = time.time() - stage_start
+
+        # Build summary stats
+        stats_summary = ", ".join(
+            f"{col_id}={stats['hits']} hits"
+            for col_id, stats in collection_stats.items()
+            if stats["hits"] > 0
+        )
+
+        logger.info(
+            f"Task {task_id}: KB_RETRIEVAL completed - "
+            f"{kb_hits_count} hits from {len(collections_processed)} collections, "
+            f"{errors_count} errors, time={stage_elapsed:.2f}s"
+        )
+        if stats_summary:
+            logger.debug(f"Task {task_id}: Collection stats: {stats_summary}")
 
         await self.update_progress(task_id, 50)
 

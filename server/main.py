@@ -37,6 +37,25 @@ async def lifespan(app: FastAPI):
     if settings.enable_rate_limit:
         logger.info(f"  Default rate limit: {settings.rate_limit_per_hour}/hour")
 
+    # Validate required configuration
+    if not settings.zhipu_api_key:
+        logger.warning(
+            "ZHIPU_API_KEY not set - LLM features will be disabled or fail"
+        )
+
+    # Validate database path is writable
+    from pathlib import Path
+    db_path = Path(settings.database_path)
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Test write access
+        test_file = db_path.parent / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+    except Exception as e:
+        logger.error(f"Database path is not writable: {e}")
+        raise
+
     # Initialize database
     try:
         await init_db()
@@ -44,6 +63,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}")
         raise
+
+    # Recover stuck tasks from previous session
+    if settings.task_startup_recovery:
+        try:
+            from server.orchestrator import recover_stuck_tasks, get_orchestrator
+
+            recovered = await recover_stuck_tasks()
+            if recovered > 0:
+                logger.info(f"✓ Recovered {recovered} stuck tasks from previous session")
+
+            # Start periodic recovery task
+            orchestrator = get_orchestrator()
+            await orchestrator.start_periodic_recovery()
+            logger.info("✓ Periodic task recovery started")
+        except Exception as e:
+            logger.warning(f"Task recovery failed (non-critical): {str(e)}")
 
     yield
 

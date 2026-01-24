@@ -74,6 +74,6 @@ export async function getTaskReports(taskId: string) {
   return get(`/precheck-tasks/${taskId}/reports`);
 }
 
-export async function deleteTask(taskId: string): Promise<{ success: boolean }> {
-  return del(`/precheck-tasks/${taskId}`);
+export async function deleteTask(taskId: string, force?: boolean): Promise<{ success: boolean }> {
+  return del(`/precheck-tasks/${taskId}${force ? '?force=true' : ''}`);
 }

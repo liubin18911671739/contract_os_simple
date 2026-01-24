@@ -6,6 +6,7 @@ Manages KB collections, documents, chunks, and embeddings
 import asyncio
 import hashlib
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -160,23 +161,58 @@ class KBService:
         chunk_overlap: int = 50,
     ) -> str:
         """
-        Import a document into KB
+        Import a document into KB from a text file path
 
         Args:
             collection_id: Target collection ID
             title: Document title
             doc_type: Document type (regulation, guideline, etc.)
-            file_path: Path to document file
+            file_path: Path to document text file (UTF-8 encoded)
             chunk_size: Maximum chunk size in characters
             chunk_overlap: Overlap between chunks
 
         Returns:
             Document ID
         """
-        # Read file
+        # Read file as UTF-8 text
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
 
+        return await self.import_text(
+            collection_id=collection_id,
+            title=title,
+            doc_type=doc_type,
+            text=text,
+            object_key=file_path,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+    async def import_text(
+        self,
+        collection_id: str,
+        title: str,
+        doc_type: str,
+        text: str,
+        object_key: str = "",
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+    ) -> str:
+        """
+        Import a document into KB from text content
+
+        Args:
+            collection_id: Target collection ID
+            title: Document title
+            doc_type: Document type (regulation, guideline, etc.)
+            text: Document text content
+            object_key: Optional storage key for the original file
+            chunk_size: Maximum chunk size in characters
+            chunk_overlap: Overlap between chunks
+
+        Returns:
+            Document ID
+        """
         # Calculate hash
         file_hash = hashlib.sha256(text.encode()).hexdigest()
 
@@ -200,7 +236,7 @@ class KBService:
             collection_id=collection_id,
             title=title,
             doc_type=doc_type,
-            object_key=file_path,  # For simplicity, store path
+            object_key=object_key,  # Storage key for the original file
             version=1,
             hash=file_hash,
         )
@@ -267,36 +303,55 @@ class KBService:
         return chunks
 
     async def _embed_and_index_chunks(self, doc_id: str, chunks: List[str]):
-        """Generate embeddings and index chunks"""
-        # Get chunk IDs
-        query = select(KBChunk).where(KBChunk.document_id == doc_id)
-        result = await self.session.execute(query)
-        chunk_records = result.scalars().all()
+        """Generate embeddings and index chunks with error handling"""
+        try:
+            # Get chunk IDs
+            query = select(KBChunk).where(KBChunk.document_id == doc_id)
+            result = await self.session.execute(query)
+            chunk_records = result.scalars().all()
 
-        chunk_ids = [chunk.id for chunk in chunk_records]
-        chunk_texts = [chunk.text for chunk in chunk_records]
+            chunk_ids = [chunk.id for chunk in chunk_records]
+            chunk_texts = [chunk.text for chunk in chunk_records]
 
-        # Generate embeddings (batch)
-        embeddings = await self.llm_service.embed(chunk_texts)
+            if not chunk_ids:
+                logger.warning(f"Document {doc_id}: No chunks found to embed")
+                return
 
-        # Store in Faiss
-        # Get collection ID from first chunk
-        if chunk_ids:
-            # Get document to find collection
+            logger.info(f"Document {doc_id}: Generating embeddings for {len(chunk_texts)} chunks")
+
+            # Generate embeddings (batch)
+            embeddings = await self.llm_service.embed(chunk_texts)
+
+            if not embeddings or len(embeddings) != len(chunk_texts):
+                logger.error(f"Document {doc_id}: Embedding count mismatch, expected {len(chunk_texts)}, got {len(embeddings) if embeddings else 0}")
+                return
+
+            # Store in Faiss
+            # Get collection ID from first chunk
             doc = await self.session.get(KBDocument, doc_id)
-            if doc:
-                vector_store = get_vector_store(doc.collection_id)
-                vector_store.add_vectors(embeddings, chunk_ids)
+            if not doc:
+                logger.error(f"Document {doc_id}: Document not found for embedding")
+                return
 
-                # Create embedding records
-                for chunk_id in chunk_ids:
-                    embedding = KBEmbedding(chunk_id=chunk_id)
-                    self.session.add(embedding)
+            vector_store = get_vector_store(doc.collection_id)
+            vector_store.add_vectors(embeddings, chunk_ids)
 
-                await self.session.commit()
+            # Create embedding records
+            for chunk_id in chunk_ids:
+                embedding = KBEmbedding(chunk_id=chunk_id)
+                self.session.add(embedding)
 
-                # Save index
-                vector_store.save()
+            await self.session.commit()
+
+            # Save index to disk
+            vector_store.save()
+
+            logger.info(f"Document {doc_id}: Successfully indexed {len(chunk_ids)} chunks in collection {doc.collection_id}")
+
+        except Exception as e:
+            logger.error(f"Document {doc_id}: Failed to generate embeddings - {str(e)}", exc_info=True)
+            # Don't raise - allow document to be saved even if embedding fails
+            # User can re-index later
 
     async def search_chunks(
         self,
@@ -315,6 +370,14 @@ class KBService:
         Returns:
             List of chunks with scores
         """
+        start_time = time.time()
+        query_preview = query[:100] + "..." if len(query) > 100 else query
+
+        logger.debug(
+            f"KB search: collection_id={collection_id}, top_k={top_k}, "
+            f"query='{query_preview}'"
+        )
+
         try:
             # Generate query embedding with timeout
             query_vector = await asyncio.wait_for(
@@ -322,24 +385,45 @@ class KBService:
                 timeout=KB_SEARCH_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            logger.error(f"Embedding generation timed out for collection {collection_id}")
+            logger.error(
+                f"KB search: Embedding timed out for collection {collection_id}"
+            )
             raise RuntimeError(f"Embedding generation timed out after {KB_SEARCH_TIMEOUT}s")
         except RuntimeError as e:
-            logger.error(f"Embedding generation failed for collection {collection_id}: {e}")
+            logger.error(
+                f"KB search: Embedding failed for collection {collection_id}: {e}"
+            )
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in embedding generation: {e}")
+            logger.error(f"KB search: Unexpected error in embedding: {e}", exc_info=True)
             raise RuntimeError(f"Embedding generation failed: {str(e)}")
 
         # Search Faiss index
         vector_store = get_vector_store(collection_id)
+        index_size = vector_store.size
         results = vector_store.search(query_vector, top_k)
+
+        logger.debug(
+            f"KB search: collection_id={collection_id}, "
+            f"index_size={index_size}, found={len(results)} results"
+        )
 
         # Fetch chunk details
         chunk_ids = [chunk_id for chunk_id, _ in results]
         score_map = {chunk_id: score for chunk_id, score in results}
 
         if not chunk_ids:
+            # Only warn if index has data but no matches
+            if index_size > 0:
+                logger.warning(
+                    f"KB search: No matches for collection {collection_id} "
+                    f"(index_size={index_size})"
+                )
+            else:
+                logger.debug(
+                    f"KB search: Collection {collection_id} has empty index "
+                    f"(no documents indexed yet)"
+                )
             return []
 
         stmt = select(KBChunk).where(KBChunk.id.in_(chunk_ids))
@@ -361,6 +445,21 @@ class KBService:
                         "meta": chunk.meta_json,
                     }
                 )
+
+        elapsed = time.time() - start_time
+        top_score = results[0][1] if results else 0
+
+        # Only log success if we returned results or if index has data
+        if output or index_size > 0:
+            logger.info(
+                f"KB search success: collection_id={collection_id}, "
+                f"returned={len(output)}/{top_k}, top_score={top_score:.3f}, "
+                f"time={elapsed:.2f}s"
+            )
+        else:
+            logger.debug(
+                f"KB search: collection_id={collection_id} returned 0 results (empty index)"
+            )
 
         return output
 

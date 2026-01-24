@@ -47,6 +47,7 @@ def get_engine() -> AsyncEngine:
             dbapi_conn.execute("PRAGMA journal_mode=WAL")
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
             dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+            dbapi_conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout for locks
 
         from sqlalchemy import event
 
@@ -111,6 +112,7 @@ async def execute_raw_sql(query: str, params: tuple = ()) -> aiosqlite.Cursor:
     conn = await aiosqlite.connect(db_path)
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
+    await conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
 
     try:
         cursor = await conn.execute(query, params)
@@ -126,6 +128,7 @@ async def fetch_all_sql(query: str, params: tuple = ()) -> list:
     conn = await aiosqlite.connect(db_path)
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
+    await conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
 
     try:
         cursor = await conn.execute(query, params)
@@ -142,6 +145,7 @@ async def fetch_one_sql(query: str, params: tuple = ()) -> dict | None:
     conn = await aiosqlite.connect(db_path)
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA foreign_keys=ON")
+    await conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
 
     try:
         cursor = await conn.execute(query, params)

@@ -17,7 +17,7 @@ class FaissVectorStore:
     def __init__(
         self,
         collection_id: str,
-        embedding_dim: int = 1024,  # ZhipuAI embedding-3 dimension
+        embedding_dim: int = 2048,  # ZhipuAI embedding-3 dimension (2048)
     ):
         """
         Initialize Faiss vector store
@@ -149,16 +149,42 @@ class FaissVectorStore:
 
 # Global store for collection indexes
 _vector_stores: dict[str, FaissVectorStore] = {}
+_MAX_CACHED_STORES = 20  # Maximum number of vector stores to keep in memory
 
 
 def get_vector_store(collection_id: str) -> FaissVectorStore:
     """Get or create vector store for a collection"""
     if collection_id not in _vector_stores:
+        # If we have too many cached stores, remove the oldest ones
+        if len(_vector_stores) >= _MAX_CACHED_STORES:
+            # Remove oldest entries (first half)
+            items_to_remove = list(_vector_stores.keys())[:_MAX_CACHED_STORES // 2]
+            for key in items_to_remove:
+                # Save before removing
+                try:
+                    _vector_stores[key].save()
+                except Exception:
+                    pass
+                del _vector_stores[key]
         _vector_stores[collection_id] = FaissVectorStore(collection_id)
     return _vector_stores[collection_id]
+
+
+def release_vector_store(collection_id: str):
+    """Release a vector store from memory (saves before releasing)"""
+    if collection_id in _vector_stores:
+        try:
+            _vector_stores[collection_id].save()
+        except Exception:
+            pass
+        del _vector_stores[collection_id]
 
 
 def save_all_vector_stores():
     """Save all vector stores to disk"""
     for store in _vector_stores.values():
-        store.save()
+        try:
+            store.save()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to save vector store: {e}")

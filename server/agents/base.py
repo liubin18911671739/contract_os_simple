@@ -13,6 +13,11 @@ from server.database.models import PrecheckTask
 from server.services.task_service import TaskService
 
 
+class TaskCancelledException(Exception):
+    """Raised when a task is cancelled during execution"""
+    pass
+
+
 class BaseAgent(ABC):
     """Base class for all precheck agents"""
 
@@ -86,8 +91,30 @@ class BaseAgent(ABC):
         )
 
     async def check_cancelled(self, task_id: str) -> bool:
-        """Check if task was cancelled"""
-        return await self.task_service.is_cancel_requested(task_id)
+        """
+        Check if task was cancelled
+
+        This checks both the orchestrator's in-memory cancelled set (for immediate response)
+        and the database's cancel_requested flag (for persistence across restarts).
+
+        Returns:
+            True if cancelled, False otherwise
+
+        Raises:
+            TaskCancelledException: If task was cancelled
+        """
+        # First check orchestrator's in-memory set (fast, immediate)
+        from server.orchestrator import TaskOrchestrator
+        if TaskOrchestrator.is_cancelled(task_id):
+            raise TaskCancelledException(f"Task {task_id} was cancelled")
+
+        # Also check database flag (for cross-server cancellation)
+        if await self.task_service.is_cancel_requested(task_id):
+            # Add to orchestrator's cancelled set for future checks
+            TaskOrchestrator._cancelled_tasks.add(task_id)
+            raise TaskCancelledException(f"Task {task_id} was cancelled")
+
+        return False
 
     async def update_progress(self, task_id: str, progress: int):
         """Update task progress"""

@@ -7,6 +7,7 @@
 这是对原始 Node.js 版本 Contract OS 系统的重构，具有以下技术栈变更：
 
 ### 后端替换
+
 ```diff
 - Node.js + Fastify + TypeScript
 + Python 3.11+ + FastAPI
@@ -31,6 +32,7 @@
 ```
 
 ### 前端保持不变
+
 - ✅ React + Vite + TailwindCSS
 - ✅ 所有页面和组件
 - ✅ API 客户端代码
@@ -113,40 +115,43 @@ contract_os_simple/
 ### 后端设置
 
 1. **创建并激活虚拟环境**
+
    ```bash
    python -m venv .venv
    source .venv/bin/activate
    ```
-
 2. **安装依赖**
+
    ```bash
    cd server
    pip install -r requirements.txt
    ```
-
 3. **配置环境变量**
+
    ```bash
    cp ../.env.example ../.env
    # 编辑 .env 并添加你的 ZHIPU_API_KEY
    ```
-
 4. **初始化数据库**
+
    ```bash
    cd ..
    python scripts/init_db.py
    ```
-
 5. **（可选）初始化示例 KB 数据**
+
    ```bash
    python scripts/seed_kb.py
    ```
+
    这将创建两个示例知识库集合：
+
    - Contract Regulations
    - Contract Best Practices
 
    **注意**: 如果 API 余额不足，集合仍会被创建，但文档不会导入 embedding。你可以稍后通过 API 或 UI 导入。
-
 6. **启动后端**
+
    ```bash
    cd server
    python main.py
@@ -159,18 +164,19 @@ contract_os_simple/
 ### 前端设置（新终端）
 
 1. **复制前端代码**
+
    ```bash
    # 如果还没复制，从原项目复制
    cp -r /path/to/contract_os/client ./client
    ```
-
 2. **安装依赖**
+
    ```bash
    cd client
    npm install
    ```
-
 3. **启动前端**
+
    ```bash
    npm run dev
    ```
@@ -202,11 +208,13 @@ open htmlcov/index.html  # macOS
 所有端点与原 Node.js 版本完全兼容：
 
 ### 合同
+
 - `POST /api/contracts` - 创建合同
 - `GET /api/contracts/{id}` - 获取合同详情及版本
 - `POST /api/contracts/{id}/versions` - 上传合同版本
 
 ### 任务
+
 - `GET /api/precheck-tasks` - 列表任务（分页、筛选、排序）
 - `POST /api/precheck-tasks` - 创建任务
 - `GET /api/precheck-tasks/{id}` - 获取任务详情
@@ -218,6 +226,7 @@ open htmlcov/index.html  # macOS
 - `POST /api/precheck-tasks/{id}/report` - 生成报告
 
 ### 知识库
+
 - `POST /api/kb/collections` - 创建 KB 集合
 - `GET /api/kb/collections` - 列出集合
 - `GET /api/kb/collections/{id}` - 获取集合详情
@@ -225,9 +234,11 @@ open htmlcov/index.html  # macOS
 - `POST /api/kb/collections/{id}/documents` - 导入文档
 
 ### 仪表盘
+
 - `GET /api/dashboard/stats` - 获取仪表盘统计
 
 ### 健康检查
+
 - `GET /api/health` - 健康检查
 
 ## 配置
@@ -260,12 +271,14 @@ MAX_API_CONCURRENT=5
 ## 开发
 
 ### 运行测试
+
 ```bash
 cd server
 pytest tests/
 ```
 
 ### 数据库管理
+
 ```bash
 # 初始化/重置数据库
 python scripts/init_db.py
@@ -275,6 +288,7 @@ sqlite3 data/database.db
 ```
 
 ### 监控
+
 - 在数据库的 `task_events` 表中查看任务日志
 - 检查 Faiss 索引: `ls -la data/faiss_indexes/`
 - 监控存储: `ls -la storage/`
@@ -289,17 +303,21 @@ sqlite3 data/database.db
 ## 故障排除
 
 ### SQLite 锁定错误
+
 如果遇到 "database is locked" 错误：
+
 - WAL 模式默认已启用
 - 如需要可增加 `MAX_CONCURRENT_TASKS`
 - 检查是否有长事务
 
 ### LLM API 错误
+
 - 检查 `ZHIPU_API_KEY` 是否有效
 - 验证 API 配额/余额
 - 如被限流可调整 `MAX_API_CONCURRENT`
 
 ### 导入错误
+
 ```bash
 # 重新安装依赖
 pip install -r requirements.txt --force-reinstall
@@ -328,12 +346,16 @@ API 完全兼容。迁移步骤：
 ## 相关文档
 
 ### 核心文档
+
 - [DEVELOPMENT_GUIDE.md](./docs/DEVELOPMENT_GUIDE.md) - 完整的开发指南（开发环境配置、架构说明、最佳实践）
 - [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md) - 部署指南（Docker、云平台、生产环境配置）
 - [API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) - API 文档（所有端点、请求/响应格式、示例）
 - [TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) - 故障排除指南（常见问题诊断和解决方案）
 
+### rm -rf /Users/robin/project/contract_os_simple/data/faiss_indexes/* && echo "Cleared Faiss indexes"
+
 ### 其他文档
+
 - [TODO.md](./TODO.md) - 开发任务和 POC 验收标准
 - [QUICKSTART.md](./docs/QUICKSTART.md) - 10 分钟快速指南
 - [IMPLEMENTATION_SUMMARY.md](./docs/IMPLEMENTATION_SUMMARY.md) - 技术实现细节

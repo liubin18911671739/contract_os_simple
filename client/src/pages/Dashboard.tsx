@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { FileText, AlertTriangle, CheckCircle, Clock, X, Trash2 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import {
   Table,
@@ -14,6 +14,7 @@ import { Badge } from '../components/ui/Badge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatsCard } from '../components/ui/StatsCard';
 import { ProgressBar } from '../components/ui/Progress';
+import { cancelTask, deleteTask } from '../api/tasks';
 
 interface DashboardStats {
   total_contracts: number;
@@ -35,6 +36,7 @@ interface RecentTask {
   created_at: string;
   high_risks: number;
   medium_risks: number;
+  cancel_requested?: boolean;
 }
 
 export default function Dashboard() {
@@ -42,6 +44,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<RecentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -91,6 +94,62 @@ export default function Dashboard() {
       isMounted = false;
     };
   }, []);
+
+  const refreshTasks = async () => {
+    try {
+      const tasksRes = await fetch('/api/dashboard/recent-tasks?page=1&limit=5');
+      if (tasksRes.ok) {
+        const tasksData = await tasksRes.json();
+        setTasks(tasksData.tasks || []);
+      }
+    } catch (err) {
+      console.error('Failed to refresh tasks:', err);
+    }
+  };
+
+  const handleCancelTask = async (taskId: string) => {
+    if (!confirm('确定要取消此任务吗？')) return;
+
+    setActionLoading(prev => ({ ...prev, [taskId]: true }));
+    try {
+      await cancelTask(taskId);
+      await refreshTasks();
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || '取消任务失败';
+      alert(message);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [taskId]: false }));
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string, force: boolean = false) => {
+    const message = force
+      ? '此任务正在运行，确定要强制删除吗？此操作将取消任务并删除所有相关数据，不可恢复。'
+      : '确定要删除此任务吗？此操作不可恢复。';
+
+    if (!confirm(message)) return;
+
+    setActionLoading(prev => ({ ...prev, [taskId]: true }));
+    try {
+      await deleteTask(taskId, force);
+      await refreshTasks();
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || '删除任务失败';
+      alert(message);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [taskId]: false }));
+    }
+  };
+
+  const canCancelTask = (task: RecentTask) => {
+    return task.status !== 'COMPLETED' && task.status !== 'DONE' &&
+           task.status !== 'FAILED' && task.status !== 'CANCELLED';
+  };
+
+  const canDeleteTask = (task: RecentTask) => {
+    return task.status === 'COMPLETED' || task.status === 'DONE' ||
+           task.status === 'FAILED' || task.status === 'CANCELLED';
+  };
 
   if (loading) {
     return (
@@ -216,19 +275,26 @@ export default function Dashboard() {
                     <TableCell>
                       <Badge
                         color={
-                          task.status === 'DONE'
+                          task.status === 'COMPLETED' || task.status === 'DONE'
                             ? 'emerald'
                             : task.status === 'FAILED'
                             ? 'red'
+                            : task.status === 'CANCELLED'
+                            ? 'gray'
                             : 'blue'
                         }
                       >
-                        {task.status === 'DONE'
+                        {task.status === 'COMPLETED' || task.status === 'DONE'
                           ? '完成'
                           : task.status === 'FAILED'
                           ? '失败'
+                          : task.status === 'CANCELLED'
+                          ? '已取消'
                           : '进行中'}
                       </Badge>
+                      {task.cancel_requested && (
+                        <span className="ml-1 text-xs text-amber-600">(取消中)</span>
+                      )}
                     </TableCell>
                     <TableCell className="w-32">
                       <ProgressBar progress={task.progress} />
@@ -250,19 +316,58 @@ export default function Dashboard() {
                       {new Date(task.created_at).toLocaleDateString('zh-CN')}
                     </TableCell>
                     <TableCell>
-                      {task.status === 'DONE' ? (
-                        <Link to={`/results/${task.id}`}>
-                          <Button size="sm" variant="secondary">
-                            查看结果
+                      <div className="flex items-center gap-1">
+                        {(task.status === 'COMPLETED' || task.status === 'DONE') ? (
+                          <Link to={`/results/${task.id}`}>
+                            <Button size="sm" variant="secondary">
+                              查看结果
+                            </Button>
+                          </Link>
+                        ) : (
+                          <Link to={`/processing/${task.id}`}>
+                            <Button size="sm" variant="ghost">
+                              查看进度
+                            </Button>
+                          </Link>
+                        )}
+                        {canCancelTask(task) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            onClick={() => handleCancelTask(task.id)}
+                            disabled={actionLoading[task.id] || task.cancel_requested}
+                            title="取消任务"
+                          >
+                            <X className="w-4 h-4" />
                           </Button>
-                        </Link>
-                      ) : (
-                        <Link to={`/processing/${task.id}`}>
-                          <Button size="sm" variant="ghost">
-                            查看进度
+                        )}
+                        {canDeleteTask(task) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => handleDeleteTask(task.id)}
+                            disabled={actionLoading[task.id]}
+                            title="删除任务"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </Button>
-                        </Link>
-                      )}
+                        )}
+                        {/* Force delete button for running tasks */}
+                        {canCancelTask(task) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-300"
+                            onClick={() => handleDeleteTask(task.id, true)}
+                            disabled={actionLoading[task.id]}
+                            title="强制删除（取消并删除）"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

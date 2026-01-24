@@ -92,11 +92,18 @@ async def get_task_events(
     session: AsyncSession = Depends(get_session),
 ) -> list[TaskEventResponse]:
     """Get task events"""
-    task_service = TaskService(session)
+    import logging
 
-    events = await task_service.get_task_events(task_id)
+    logger = logging.getLogger(__name__)
 
-    return events
+    try:
+        task_service = TaskService(session)
+        events = await task_service.get_task_events(task_id)
+        return events
+    except Exception as e:
+        logger.error(f"Error fetching events for task {task_id}: {str(e)}", exc_info=True)
+        # Return empty list instead of 500 error for better UX
+        return []
 
 
 @router.post("/{task_id}/cancel")
@@ -209,7 +216,7 @@ async def generate_report(
         select(TaskEvent)
         .where(TaskEvent.task_id == task_id)
         .where(TaskEvent.message.like("%Report generated:%"))
-        .order_by(desc(TaskEvent.created_at))
+        .order_by(desc(TaskEvent.ts))
         .limit(1)
     )
     result = await session.execute(events_query)
@@ -261,7 +268,7 @@ async def download_report(
         select(TaskEvent)
         .where(TaskEvent.task_id == task_id)
         .where(TaskEvent.message.like("%Report generated:%"))
-        .order_by(desc(TaskEvent.created_at))
+        .order_by(desc(TaskEvent.ts))
         .limit(1)
     )
     result = await session.execute(events_query)
@@ -291,17 +298,30 @@ async def download_report(
 @router.delete("/{task_id}")
 async def delete_task(
     task_id: str,
+    force: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> SuccessResponse:
-    """Delete a task and all its related data"""
+    """Delete a task and all its related data
+
+    Args:
+        task_id: Task ID to delete
+        force: If True, cancel running task before deleting
+    """
+    from ..orchestrator import get_orchestrator
+
     task_service = TaskService(session)
 
     try:
-        success = await task_service.delete_task(task_id)
+        success = await task_service.delete_task(task_id, force=force)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # If force was used and task was running, notify orchestrator to stop processing
+    if force:
+        orchestrator = get_orchestrator()
+        await orchestrator.mark_task_deleted(task_id)
 
     return SuccessResponse(success=True)
