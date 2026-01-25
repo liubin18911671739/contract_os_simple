@@ -13,6 +13,7 @@ Contract OS Simple is a contract pre-review system that processes contracts thro
 - **Task Queue**: asyncio (replaces BullMQ + Redis)
 - **Storage**: Local filesystem (replaces MinIO)
 - **LLM**: ZhipuAI API (replaces local vLLM)
+- **Frontend**: React + TypeScript + Vite + Zustand (state) + React Router
 
 ## Development Commands
 
@@ -30,6 +31,9 @@ python scripts/init_db.py
 
 # Seed sample KB data (optional)
 python scripts/seed_kb.py
+
+# Add database indexes to existing database
+python scripts/migrate_add_indexes.py
 ```
 
 ### Running the Application
@@ -40,7 +44,19 @@ python -m uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 
 # Frontend (separate terminal)
 cd client
+npm install  # First time only
 npm run dev
+```
+
+### Frontend Commands
+```bash
+cd client
+npm run dev         # Start dev server (http://localhost:5173)
+npm run build       # Production build
+npm run lint        # Run ESLint
+npm run test        # Run Vitest tests
+npm run test:ui     # Run tests with UI
+npm run test:coverage # Run tests with coverage report
 ```
 
 ### Database Operations
@@ -53,6 +69,9 @@ sqlite3 data/database.db "SELECT * FROM task_events ORDER BY ts DESC LIMIT 10;"
 
 # Reset database
 rm data/database.db && python scripts/init_db.py
+
+# Show current indexes
+python scripts/migrate_add_indexes.py --show
 ```
 
 ### Testing
@@ -75,7 +94,8 @@ python server/tests/benchmarks.py
 ```
 
 **Test Framework Details**:
-- Uses `pytest` with `pytest-asyncio` for async test support
+- Backend: `pytest` with `pytest-asyncio` for async test support
+- Frontend: `vitest` for unit/integration tests
 - Test fixtures in `server/tests/conftest.py` provide test_db, test_settings, sample data
 - Tests use temporary databases (`/tmp/test_db.db`) for isolation
 - Set environment variables before imports in conftest.py for test configuration
@@ -137,12 +157,14 @@ Services (`server/services/`) are business logic layer:
   - `chat_with_json()` - JSON generation with retry logic
   - `embed()` - Batch embedding generation
   - `rerank()` - Document reranking
-  - Concurrency controlled via Semaphore (`MAX_API_CONCURRENT`)
+  - **Separate semaphores** for chat/embed/rerank to prevent blocking (chat: 1/2 capacity, embed: 2x capacity, rerank: full capacity)
+  - In-memory embedding cache for query vectors (1000 entry LRU cache)
 
 - **KBService** (`kb_service.py`) - Knowledge base with:
   - Faiss vector indexes stored in `data/faiss_indexes/{collection_id}/`
   - Document chunking with configurable size/overlap
   - Hybrid search: Faiss ANN + ZhipuAI Rerank-2
+  - Query embedding cache to avoid redundant API calls
 
 - **TaskService** (`task_service.py`) - Task lifecycle:
   - Creates task with `QUEUED` status
@@ -159,6 +181,8 @@ All models defined in `server/database/models.py` using SQLAlchemy declarative b
 - `Risk` → `Evidence`, `RuleHit`, `KBCitation` (one-to-many)
 - `PrecheckTask` → `TaskKBSnapshot` (one-to-many)
 
+**Important**: `KBCitation.chunk_id` is nullable to handle LLM hallucination of invalid chunk IDs. The LLM risk agent validates chunk_ids against actual KB hits before creating citations.
+
 ### Vector Storage
 
 Faiss indexes (`server/utils/vector_store.py`):
@@ -174,10 +198,21 @@ Faiss indexes (`server/utils/vector_store.py`):
 
 Key endpoints:
 - `POST /api/precheck-tasks` - Creates task AND starts orchestrator (returns task ID)
+- `GET /api/precheck-tasks` - List tasks with pagination, filters, sort
 - `GET /api/precheck-tasks/{id}` - Returns task with progress %
 - `GET /api/precheck-tasks/{id}/clauses` - Returns clauses with risk info
 - `GET /api/precheck-tasks/{id}/events` - Event log for debugging
+- `GET /api/precheck-tasks/{id}/summary` - Task summary statistics
+- `POST /api/precheck-tasks/{id}/cancel` - Cancel a running task
+- `POST /api/precheck-tasks/{id}/conclusion` - Set task conclusion
+- `POST /api/precheck-tasks/{id}/report` - Generate/download report
 - `DELETE /api/precheck-tasks/{id}?force=true` - Delete task (force=true cancels running tasks)
+- `POST /api/precheck-tasks/{id}/retry` - Retry a FAILED or CANCELLED task
+- `GET /api/kb/cache-stats` - Embedding cache statistics
+- `POST /api/kb/search` - Search knowledge base with reranking
+- `GET /api/metrics/overview` - Metrics dashboard data
+- `GET /api/metrics/f1-score` - F1 score based on risk confirmation
+- `GET /api/metrics/hallucination-rate` - Hallucination rate metrics
 
 ## Configuration
 
@@ -186,10 +221,12 @@ Environment variables in `.env`:
 - `DATABASE_PATH` - SQLite database location
 - `STORAGE_ROOT` - File storage root
 - `MAX_CONCURRENT_TASKS` - Max parallel tasks (default: 3)
-- `MAX_API_CONCURRENT` - Max parallel API calls (default: 5)
-- `TASK_TIMEOUT` - Seconds before stuck task is marked failed (default: 1800)
-- `TASK_RECOVERY_INTERVAL` - Seconds between stuck task scans (default: 600)
+- `MAX_API_CONCURRENT` - Base max parallel API calls (default: 5)
+- `TASK_TIMEOUT` - Seconds before stuck task is marked failed (default: 300)
+- `TASK_RECOVERY_INTERVAL` - Seconds between stuck task scans (default: 60)
 - `TASK_STARTUP_RECOVERY` - Enable startup recovery of stuck tasks (default: true)
+- `ENABLE_RATE_LIMIT` - Enable IP-based rate limiting (default: true)
+- `RATE_LIMIT_PER_HOUR` - Default rate limit per IP (default: 200)
 
 Configuration loaded via `pydantic-settings` in `server/config.py`.
 
@@ -207,16 +244,30 @@ File parsing (`server/utils/file_parser.py`):
 2. **LLM JSON parsing failures**: Automatic retry with repair prompt, fallback to `NEEDS_REVIEW` risk
 3. **Database errors**: SQLAlchemy async sessions auto-rollback on exception
 4. **Cancellation**: Agents check `await self.check_cancelled()` periodically
+5. **Invalid chunk_id from LLM**: LLMRiskAgent validates chunk_ids against KB hits, falls back to first available chunk
+6. **Rate limiting**: IP-based rate limiting using slowapi (disabled in tests)
 
 ## Key Dependencies
 
+**Backend (Python):**
 - `fastapi` + `uvicorn` - Web framework
 - `sqlalchemy` + `aiosqlite` - Async ORM
 - `faiss-cpu` - Vector similarity search
 - `zhipuai` - LLM API client
+- `slowapi` - Rate limiting
 - `PyPDF2`, `python-docx` - File parsing
 - `pydantic` - Data validation
 - `greenlet` - Required for SQLAlchemy async
+
+**Frontend (Node.js):**
+- `react` + `react-dom` - UI framework
+- `vite` - Build tool
+- `react-router-dom` - Routing
+- `zustand` - State management
+- `recharts` - Charts
+- `lucide-react` - Icons
+- `vitest` - Testing framework
+- `tailwindcss` - Styling
 
 ## Important Implementation Notes
 
@@ -250,20 +301,54 @@ The orchestrator supports force-deleting running tasks:
 - The orchestrator tracks deleted tasks in `deleted_tasks` set to prevent DB updates after deletion
 - Agents should call `await self.check_cancelled()` periodically to respect cancellation
 - `TaskCancelledException` is raised when a task is cancelled mid-stage
+- `POST /api/precheck-tasks/{id}/retry` - Retries FAILED or CANCELLED tasks by resetting to QUEUED and restarting orchestrator
+
+### LLM Risk Agent - Chunk ID Validation
+
+The LLM often returns invalid `chunk_id` values (like descriptive text instead of actual IDs). The agent handles this:
+1. Creates a mapping of valid chunk_ids from KB hits before processing
+2. Validates LLM-returned chunk_ids against the valid set
+3. Falls back to quote text matching if direct match fails
+4. Uses first available chunk_id as last resort
+5. Only creates KBCitation records with valid chunk_ids
+
+This prevents FOREIGN KEY constraint errors in `kb_citations` table.
 
 ## Common Issues
 
 - **SQLite locked**: Ensure WAL mode enabled (check `connection.py`)
 - **Import errors**: Use absolute imports from project root, add to sys.path in scripts
-- **LLM rate limits**: Adjust `MAX_API_CONCURRENT` in `.env`
+- **LLM rate limits**: Adjust `MAX_API_CONCURRENT` in `.env` (affects chat/embed/rerank separately)
 - **Faiss import issues**: Verify numpy version compatibility
 - **Agent stuck**: Check event logs via `task_events` table
-- **Stuck tasks**: Server restart triggers automatic recovery of tasks stuck >30 minutes (configurable via `TASK_TIMEOUT`)
+- **Stuck tasks**: Server restart triggers automatic recovery of tasks stuck >5 minutes (configurable via `TASK_TIMEOUT`)
+- **Foreign key errors on kb_citations**: LLM returned invalid chunk_id - see validation logic in `llm_risk_agent.py`
+- **MissingGreenlet errors**: Use `selectinload()` for eager loading in SQLAlchemy queries to prevent lazy loading issues
+
+## Frontend Structure
+
+**Pages** (`client/src/pages/`):
+- `Dashboard.tsx` - Main dashboard with stats
+- `KBAdmin.tsx` - Knowledge base management
+- `NewTaskUpload.tsx` - Create new precheck task
+- `Processing.tsx` - Monitor task progress
+- `Results.tsx` - View task results and risks
+- `Review.tsx` - Review and confirm/dismiss risks
+- `Evaluation.tsx` - Metrics dashboard (F1, hallucination rate)
+- `Settings.tsx` - Application settings
+
+**Components** (`client/src/components/`):
+- `ui/` - Reusable UI components (Button, Card, Modal, Table, etc.)
+- `kb/` - Knowledge base specific components (Search, DocumentChunks, etc.)
+- `layout/` - Layout components (Header, Sidebar, MainLayout)
+
+**State Management**: Zustand stores in `client/src/api/` for API communication
 
 ## Testing Configuration
 
 **Test Database Schema Note**:
 - `RuleHit.risk_id` is `nullable=True` to allow rule hits before risks are created
+- `KBCitation.chunk_id` is `nullable=True` to handle LLM hallucination
 - Test environment variables set in `pytest.ini` and `.env.test`
 - Tests use `@pytest.mark.asyncio` for async test functions
 - Temporary test databases created per test function for isolation
@@ -271,4 +356,5 @@ The orchestrator supports force-deleting running tasks:
 **Current Test Coverage**:
 - `test_task_service.py` - CRUD operations, progress updates, event logging, pagination
 - `test_agents.py` - RulesAgent keyword matching
+- `test_integration.py` - Full pipeline integration tests
 - Benchmarks available in `server/tests/benchmarks.py` for performance testing

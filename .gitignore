@@ -63,3 +63,26 @@ htmlcov/
 client/node_modules/
 client/dist/
 client/.env
+client/.vite/
+client/build/
+
+# Vector indexes
+data/faiss_indexes/
+
+# Package manager (root level for monorepo tools)
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Type checking
+.pytype/
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/

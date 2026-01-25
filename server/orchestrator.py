@@ -250,29 +250,37 @@ class TaskOrchestrator:
 
     async def _mark_cancelled(self, session: AsyncSession, task_id: str):
         """Mark task as cancelled"""
+        from .database.connection import get_session_maker
         from .database.models import PrecheckTask
         from .services.task_service import TaskService
 
-        task_service = TaskService(session)
-        await task_service.update_task_progress(
-            task_id, "CANCELLED", 100, status="CANCELLED"
-        )
-        await task_service.log_event(task_id, "CANCELLED", "info", "Task was cancelled")
+        # Use a fresh session in case the current one is in a broken state
+        session_maker = get_session_maker()
+        async with session_maker() as new_session:
+            task_service = TaskService(new_session)
+            await task_service.update_task_progress(
+                task_id, "CANCELLED", 100, status="CANCELLED"
+            )
+            await task_service.log_event(task_id, "CANCELLED", "info", "Task was cancelled")
 
     async def _mark_failed(
         self, session: AsyncSession, task_id: str, stage: str, error: str
     ):
         """Mark task as failed"""
+        from .database.connection import get_session_maker
         from .database.models import PrecheckTask
         from .services.task_service import TaskService
 
-        task_service = TaskService(session)
-        await task_service.update_task_progress(
-            task_id, stage, 0, status="FAILED", error_message=error
-        )
-        await task_service.log_event(
-            task_id, stage, "error", f"Task failed at {stage}: {error}"
-        )
+        # Use a fresh session in case the current one is in a broken state
+        session_maker = get_session_maker()
+        async with session_maker() as new_session:
+            task_service = TaskService(new_session)
+            await task_service.update_task_progress(
+                task_id, stage, 0, status="FAILED", error_message=error
+            )
+            await task_service.log_event(
+                task_id, stage, "error", f"Task failed at {stage}: {error}"
+            )
 
     async def _mark_completed(self, session: AsyncSession, task_id: str):
         """Mark task as completed"""

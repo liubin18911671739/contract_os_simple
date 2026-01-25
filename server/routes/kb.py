@@ -18,7 +18,9 @@ from ..database.models import KBCollection, KBChunk, KBDocument, KBEmbedding
 from ..rate_limit import RATE_LIMITS, limiter
 from ..schemas.pydantic_models import (CreateKBCollectionRequest,
                                        KBCollectionResponse,
-                                       KBDocumentResponse, SuccessResponse)
+                                       KBDocumentResponse, SuccessResponse,
+                                       KBSearchRequest, KBSearchResultResponse,
+                                       KBChunkResponse, KBCollectionStatsResponse)
 from ..services.file_service import FileService
 from ..services.kb_service import KBService
 from ..utils.file_parser import parse_file
@@ -255,3 +257,245 @@ async def list_documents(
         )
 
     return response
+
+
+@router.post("/search")
+async def search_knowledge_base(
+    request: KBSearchRequest,
+    session: AsyncSession = Depends(get_session),
+) -> list[KBSearchResultResponse]:
+    """Search knowledge base using vector similarity with reranking"""
+    kb_service = KBService(session)
+
+    # Get all enabled collections if none specified
+    collection_ids = request.collection_ids if request.collection_ids else None
+
+    try:
+        # Search for relevant chunks
+        chunks = await kb_service.search_chunks(
+            collection_ids=collection_ids,
+            query=request.query,
+            top_k=request.top_k,
+        )
+
+        # Apply reranking if we have results
+        if chunks:
+            try:
+                chunks = await kb_service.rerank_chunks(
+                    query=request.query,
+                    chunks=chunks,
+                    top_n=request.top_k,
+                )
+            except Exception as e:
+                logger.warning(f"Reranking failed, returning original results: {e}")
+
+        # Build response with document metadata
+        response = []
+        for chunk in chunks:
+            chunk_id = chunk.get("chunk_id", "")
+            score = chunk.get("_rerank_score", chunk.get("score", 0))
+            text = chunk.get("text", "")
+            meta = chunk.get("meta", {})
+
+            # Get document info
+            doc_id = meta.get("doc_id")
+            doc_title = meta.get("title", "Unknown Document")
+            doc_version = chunk.get("doc_version", 1)
+            collection_id = meta.get("collection_id")
+
+            # Truncate text for preview
+            preview_text = text[:500] if len(text) > 500 else text
+
+            response.append(
+                KBSearchResultResponse(
+                    chunk_id=chunk_id,
+                    text=preview_text,
+                    score=float(score),
+                    doc_title=doc_title,
+                    doc_version=doc_version,
+                    doc_id=doc_id,
+                    collection_id=collection_id,
+                )
+            )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"KB search failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.get("/documents/{doc_id}/chunks")
+async def get_document_chunks(
+    doc_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[KBChunkResponse]:
+    """Get all chunks for a document"""
+    from ..database.models import KBChunk, KBEmbedding
+
+    # Get chunks
+    chunks_result = await session.execute(
+        select(KBChunk)
+        .where(KBChunk.document_id == doc_id)
+        .order_by(KBChunk.chunk_index)
+    )
+    chunks = chunks_result.scalars().all()
+
+    # Check which chunks are indexed
+    indexed_chunks_result = await session.execute(
+        select(KBEmbedding.chunk_id)
+        .where(KBEmbedding.chunk_id.in_([c.id for c in chunks]))
+    )
+    indexed_chunk_ids = set(row[0] for row in indexed_chunks_result.fetchall())
+
+    return [
+        KBChunkResponse(
+            id=chunk.id,
+            document_id=chunk.document_id,
+            chunk_index=chunk.chunk_index,
+            text=chunk.text,
+            is_indexed=chunk.id in indexed_chunk_ids,
+            created_at=chunk.created_at.isoformat(),
+        )
+        for chunk in chunks
+    ]
+
+
+@router.get("/chunks/{chunk_id}")
+async def get_chunk(
+    chunk_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> KBChunkResponse:
+    """Get a specific chunk by ID"""
+    from ..database.models import KBChunk, KBEmbedding
+
+    chunk = await session.get(KBChunk, chunk_id)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+
+    # Check if indexed
+    embedding_result = await session.execute(
+        select(KBEmbedding).where(KBEmbedding.chunk_id == chunk_id)
+    )
+    is_indexed = embedding_result.scalar_one_or_none() is not None
+
+    return KBChunkResponse(
+        id=chunk.id,
+        document_id=chunk.document_id,
+        chunk_index=chunk.chunk_index,
+        text=chunk.text,
+        is_indexed=is_indexed,
+        created_at=chunk.created_at.isoformat(),
+    )
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(
+    doc_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    """Delete a document and all its chunks"""
+    from ..database.models import KBChunk, KBDocument, KBEmbedding
+    from sqlalchemy import delete
+
+    # Check if document exists
+    doc = await session.get(KBDocument, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    collection_id = doc.collection_id
+
+    # Delete embeddings and chunks (cascade should handle this, but let's be explicit)
+    # First delete embeddings for chunks in this document
+    chunks_result = await session.execute(
+        select(KBChunk.id).where(KBChunk.document_id == doc_id)
+    )
+    chunk_ids = [row[0] for row in chunks_result.fetchall()]
+
+    if chunk_ids:
+        await session.execute(
+            delete(KBEmbedding).where(KBEmbedding.chunk_id.in_(chunk_ids))
+        )
+
+    # Delete chunks
+    await session.execute(
+        delete(KBChunk).where(KBChunk.document_id == doc_id)
+    )
+
+    # Delete document
+    await session.delete(doc)
+    await session.commit()
+
+    # Rebuild Faiss index for this collection
+    kb_service = KBService(session)
+    try:
+        await kb_service.rebuild_index(collection_id)
+    except Exception as e:
+        logger.warning(f"Failed to rebuild index after document deletion: {e}")
+
+    return SuccessResponse(success=True)
+
+
+@router.get("/collections/{collection_id}/stats")
+async def get_collection_stats(
+    collection_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> KBCollectionStatsResponse:
+    """Get detailed statistics for a collection"""
+    from ..database.models import KBCollection, KBChunk, KBDocument, KBEmbedding
+
+    collection = await session.get(KBCollection, collection_id)
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Count documents
+    doc_count_result = await session.execute(
+        select(func.count(KBDocument.id)).where(KBDocument.collection_id == collection_id)
+    )
+    document_count = doc_count_result.scalar() or 0
+
+    # Count chunks
+    chunk_count_result = await session.execute(
+        select(func.count(KBChunk.id))
+        .join(KBDocument, KBDocument.id == KBChunk.document_id)
+        .where(KBDocument.collection_id == collection_id)
+    )
+    chunk_count = chunk_count_result.scalar() or 0
+
+    # Count indexed chunks
+    indexed_count_result = await session.execute(
+        select(func.count(KBEmbedding.chunk_id))
+        .join(KBChunk, KBChunk.id == KBEmbedding.chunk_id)
+        .join(KBDocument, KBDocument.id == KBChunk.document_id)
+        .where(KBDocument.collection_id == collection_id)
+    )
+    indexed_count = indexed_count_result.scalar() or 0
+
+    # Calculate average chunk size
+    avg_size_result = await session.execute(
+        select(func.avg(func.length(KBChunk.text)))
+        .join(KBDocument, KBDocument.id == KBChunk.document_id)
+        .where(KBDocument.collection_id == collection_id)
+    )
+    avg_chunk_size = avg_size_result.scalar() or 0
+
+    # Calculate storage (rough estimate)
+    total_storage_mb = (chunk_count * avg_chunk_size) / (1024 * 1024)
+
+    return KBCollectionStatsResponse(
+        id=collection.id,
+        name=collection.name,
+        document_count=document_count,
+        chunk_count=chunk_count,
+        indexed_count=indexed_count,
+        avg_chunk_size=float(avg_chunk_size),
+        total_storage_mb=round(total_storage_mb, 2),
+    )
+
+
+@router.get("/cache-stats")
+async def get_cache_stats() -> dict:
+    """Get embedding cache statistics for monitoring"""
+    from ..services.kb_service import get_cache_stats
+    return get_cache_stats()
+

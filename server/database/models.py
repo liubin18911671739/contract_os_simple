@@ -97,14 +97,17 @@ class PrecheckTask(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     kb_mode: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (
-        CheckConstraint("kb_mode IN ('STRICT', 'RELAXED')", name="check_kb_mode"),
-    )
-
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        CheckConstraint("kb_mode IN ('STRICT', 'RELAXED')", name="check_kb_mode"),
+        Index("idx_precheck_tasks_status", "status"),
+        Index("idx_precheck_tasks_status_created", "status", "created_at"),
+        Index("idx_precheck_tasks_status_updated", "status", "updated_at"),
     )
 
     # Relationships
@@ -251,7 +254,7 @@ class Risk(Base):
         default="NEEDS_REVIEW",
     )
 
-    __table_args__: tuple[CheckConstraint, CheckConstraint, CheckConstraint, Index, Index, Index] = (
+    __table_args__: tuple[CheckConstraint, CheckConstraint, CheckConstraint, Index, Index, Index, Index] = (
         CheckConstraint(
             "risk_level IN ('HIGH', 'MEDIUM', 'LOW', 'INFO')",
             name="check_risk_level",
@@ -264,6 +267,7 @@ class Risk(Base):
         Index("idx_risks_task_id", "task_id"),
         Index("idx_risks_clause_id", "clause_id"),
         Index("idx_risks_risk_level", "risk_level"),
+        Index("idx_risks_status", "status"),
     )
 
     qc_flags_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -438,7 +442,7 @@ class KBCitation(Base):
         String, ForeignKey("risks.id", ondelete="CASCADE"), nullable=False
     )
     chunk_id: Mapped[str] = mapped_column(
-        String, ForeignKey("kb_chunks.id"), nullable=False
+        String, ForeignKey("kb_chunks.id", ondelete="SET NULL"), nullable=True
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     quote_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -468,7 +472,7 @@ class KBHitTemp(Base):
         String, ForeignKey("clauses.id"), nullable=False
     )
     chunk_id: Mapped[str] = mapped_column(
-        String, ForeignKey("kb_chunks.id"), nullable=False
+        String, ForeignKey("kb_chunks.id", ondelete="SET NULL"), nullable=True
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     quote_text: Mapped[str] = mapped_column(Text, nullable=False)

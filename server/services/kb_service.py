@@ -25,6 +25,59 @@ logger = logging.getLogger(__name__)
 KB_SEARCH_TIMEOUT = 30
 KB_RERANK_TIMEOUT = 30
 
+# Simple in-memory cache for query embeddings
+# Key: hashlib.md5(query.encode()).hexdigest(), Value: embedding vector
+_embedding_cache: Dict[str, List[float]] = {}
+_CACHE_MAX_SIZE = 1000
+_CACHE_HITS = 0
+_CACHE_MISSES = 0
+
+
+def _clear_embedding_cache():
+    """Clear the embedding cache (useful for testing)"""
+    global _embedding_cache, _CACHE_HITS, _CACHE_MISSES
+    _embedding_cache.clear()
+    _CACHE_HITS = 0
+    _CACHE_MISSES = 0
+
+
+def _get_cache_key(query: str) -> str:
+    """Generate cache key from query string"""
+    return hashlib.md5(query.encode("utf-8")).hexdigest()
+
+
+def _get_cached_embedding(query: str) -> Optional[List[float]]:
+    """Get cached embedding for a query"""
+    global _CACHE_HITS, _CACHE_MISSES
+    key = _get_cache_key(query)
+    if key in _embedding_cache:
+        _CACHE_HITS += 1
+        return _embedding_cache[key]
+    _CACHE_MISSES += 1
+    return None
+
+
+def _cache_embedding(query: str, embedding: List[float]):
+    """Cache an embedding for a query"""
+    global _embedding_cache
+    # Evict oldest if cache is full (simple FIFO)
+    if len(_embedding_cache) >= _CACHE_MAX_SIZE:
+        _embedding_cache.pop(next(iter(_embedding_cache)))
+    _embedding_cache[_get_cache_key(query)] = embedding
+
+
+def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics for monitoring"""
+    total = _CACHE_HITS + _CACHE_MISSES
+    hit_rate = _CACHE_HITS / total if total > 0 else 0
+    return {
+        "size": len(_embedding_cache),
+        "max_size": _CACHE_MAX_SIZE,
+        "hits": _CACHE_HITS,
+        "misses": _CACHE_MISSES,
+        "hit_rate": f"{hit_rate:.1%}",
+    }
+
 
 class KBService:
     """Knowledge base management service"""
@@ -379,11 +432,19 @@ class KBService:
         )
 
         try:
-            # Generate query embedding with timeout
-            query_vector = await asyncio.wait_for(
-                self.llm_service.embed_single(query),
-                timeout=KB_SEARCH_TIMEOUT,
-            )
+            # Check cache first for query embedding
+            cached_vector = _get_cached_embedding(query)
+            if cached_vector is not None:
+                query_vector = cached_vector
+                logger.debug(f"KB search: Using cached embedding for query")
+            else:
+                # Generate query embedding with timeout
+                query_vector = await asyncio.wait_for(
+                    self.llm_service.embed_single(query),
+                    timeout=KB_SEARCH_TIMEOUT,
+                )
+                # Cache the result
+                _cache_embedding(query, query_vector)
         except asyncio.TimeoutError:
             logger.error(
                 f"KB search: Embedding timed out for collection {collection_id}"

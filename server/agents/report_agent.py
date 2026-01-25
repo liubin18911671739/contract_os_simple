@@ -9,7 +9,7 @@ from typing import Any, Dict
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.database.connection import fetch_all_sql
+from server.database.connection import fetch_all_sql, fetch_one_sql
 from server.database.models import (Clause, Contract, ContractVersion,
                                      Evidence, KBHitTemp, PrecheckTask, Risk)
 from server.services.file_service import FileService
@@ -101,7 +101,6 @@ class ReportAgent(BaseAgent):
                 c.clause_id,
                 c.order_no,
                 c.text,
-                c.type,
                 c.page_ref,
                 COUNT(r.id) as risk_count,
                 COUNT(r.id) FILTER (WHERE r.risk_level = 'HIGH') as high_risk_count,
@@ -109,9 +108,9 @@ class ReportAgent(BaseAgent):
                 COUNT(r.id) FILTER (WHERE r.risk_level = 'LOW') as low_risk_count,
                 COUNT(r.id) FILTER (WHERE r.risk_level = 'INFO') as info_risk_count
             FROM clauses c
-            LEFT JOIN risks r ON r.clause_id = c.clause_id
+            LEFT JOIN risks r ON r.clause_id = c.id
             WHERE c.task_id = ?
-            GROUP BY c.clause_id
+            GROUP BY c.id
             ORDER BY c.order_no
             """,
             (task_id,),
@@ -133,7 +132,7 @@ class ReportAgent(BaseAgent):
                 COUNT(DISTINCT ev.id) as evidence_count,
                 COUNT(DISTINCT kb.id) as kb_citation_count
             FROM risks r
-            JOIN clauses c ON c.clause_id = r.clause_id
+            JOIN clauses c ON c.id = r.clause_id
             LEFT JOIN evidences ev ON ev.risk_id = r.id
             LEFT JOIN kb_citations kb ON kb.risk_id = r.id
             WHERE r.task_id = ?
@@ -155,7 +154,7 @@ class ReportAgent(BaseAgent):
                 COUNT(r.id) FILTER (WHERE r.risk_level = 'INFO') as info_risks,
                 COUNT(DISTINCT r.risk_type) as risk_types_count
             FROM clauses c
-            LEFT JOIN risks r ON r.task_id = ? AND r.clause_id = c.clause_id
+            LEFT JOIN risks r ON r.task_id = ? AND r.clause_id = c.id
             WHERE c.task_id = ?
             """,
             (task_id, task_id),
@@ -168,10 +167,10 @@ class ReportAgent(BaseAgent):
                 rh.rule_id,
                 rh.rule_name,
                 rh.matched_text,
-                COUNT(r.id) as linked_risks
+                COUNT(risks.id) as linked_risks
             FROM rule_hits rh
-            LEFT JOIN risks r ON r.risk_id = rh.id
-            JOIN clauses c ON c.clause_id = rh.clause_id
+            LEFT JOIN risks risks ON risks.id = rh.risk_id
+            JOIN clauses c ON c.id = risks.clause_id
             WHERE c.task_id = ?
             GROUP BY rh.id
             ORDER BY linked_risks DESC
@@ -190,8 +189,8 @@ class ReportAgent(BaseAgent):
             "contract": (
                 {
                     "id": contract_data[0].id if contract_data else None,
-                    "title": contract_data[0].title if contract_data else "Unknown",
-                    "version": contract_data[1].version_number if contract_data else 1,
+                    "title": contract_data[0].contract_name if contract_data else "Unknown",
+                    "version": contract_data[1].version_no if contract_data else 1,
                 }
                 if contract_data
                 else None

@@ -116,6 +116,12 @@ class BaseAgent(ABC):
 
         return False
 
-    async def update_progress(self, task_id: str, progress: int):
-        """Update task progress"""
-        await self.task_service.update_task_progress(task_id, self.stage_name, progress)
+    async def update_progress(self, task_id: str, progress: int, status: str | None = None):
+        """Update task progress
+
+        Args:
+            task_id: Task ID
+            progress: Progress percentage (0-100)
+            status: Optional status to update (e.g., "COMPLETED", "FAILED")
+        """
+        await self.task_service.update_task_progress(task_id, self.stage_name, progress, status=status)

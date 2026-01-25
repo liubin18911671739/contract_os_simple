@@ -105,6 +105,9 @@ class LLMRiskAgent(BaseAgent):
                 # Parse risks
                 risks = response.get("risks", [])
 
+                # Create a mapping of valid chunk_ids from KB hits for validation
+                valid_chunk_ids = {hit.get("chunk_id"): hit for hit in kb_hits}
+
                 for risk_data in risks:
                     risk_level = risk_data.get("risk_level", "INFO")
                     risk_id = f"risk_{uuid.uuid4().hex[:12]}"
@@ -126,18 +129,42 @@ class LLMRiskAgent(BaseAgent):
                     if risk_level in risk_counts:
                         risk_counts[risk_level] += 1
 
-                    # Add KB citations
+                    # Add KB citations - only use valid chunk_ids from KB hits
                     for kb_evidence in risk_data.get("kb_evidence", []):
-                        citation_id = f"cit_{uuid.uuid4().hex[:12]}"
-                        citation = KBCitation(
-                            id=citation_id,
-                            risk_id=risk_id,
-                            chunk_id=kb_evidence.get("chunk_id", ""),
-                            score=0.8,
-                            quote_text=kb_evidence.get("quote_text", ""),
-                            doc_version=kb_evidence.get("doc_version", 1),
-                        )
-                        citations_batch.append(citation)
+                        # Try to match the LLM's chunk_id to a valid one, or use the first available
+                        llm_chunk_id = kb_evidence.get("chunk_id", "")
+                        quote_text = kb_evidence.get("quote_text", "")
+
+                        # Find matching chunk by quote text or use first available
+                        matched_chunk_id = None
+                        if llm_chunk_id in valid_chunk_ids:
+                            matched_chunk_id = llm_chunk_id
+                        else:
+                            # Try to find a chunk with matching quote text
+                            for chunk_id, hit in valid_chunk_ids.items():
+                                if quote_text and hit.get("quote_text", "") in quote_text:
+                                    matched_chunk_id = chunk_id
+                                    break
+                                elif quote_text in hit.get("quote_text", ""):
+                                    matched_chunk_id = chunk_id
+                                    break
+
+                            # If no match, use the first available chunk_id (or None if no KB hits)
+                            if not matched_chunk_id and valid_chunk_ids:
+                                matched_chunk_id = next(iter(valid_chunk_ids))
+
+                        # Only create citation if we have a valid chunk_id
+                        if matched_chunk_id:
+                            citation_id = f"cit_{uuid.uuid4().hex[:12]}"
+                            citation = KBCitation(
+                                id=citation_id,
+                                risk_id=risk_id,
+                                chunk_id=matched_chunk_id,
+                                score=0.8,
+                                quote_text=quote_text or valid_chunk_ids[matched_chunk_id].get("quote_text", ""),
+                                doc_version=kb_evidence.get("doc_version", 1),
+                            )
+                            citations_batch.append(citation)
 
                 clause_elapsed = time.time() - clause_start
                 clause_times.append(clause_elapsed)
@@ -173,10 +200,9 @@ class LLMRiskAgent(BaseAgent):
                 risks_batch.append(risk)
                 risk_counts["ERROR"] += 1
 
-            # Update progress periodically (every 5 clauses or on last clause)
-            if i % 5 == 0 or i == total_clauses:
-                current_progress = 50 + int(progress_step * i / total_clauses)
-                await self.update_progress(task_id, current_progress)
+            # Update progress after each clause to prevent timeout
+            current_progress = 50 + int(progress_step * i / total_clauses)
+            await self.update_progress(task_id, current_progress)
 
         # Single batch commit for all risks and citations
         if risks_batch:

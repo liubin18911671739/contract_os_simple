@@ -16,8 +16,13 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Semaphore for API concurrency control
-_api_semaphore = asyncio.Semaphore(settings.max_api_concurrent)
+# Separate semaphores for different API types to prevent blocking
+# Chat operations are I/O intensive and can run fewer concurrent requests
+# Embed operations are lightweight and can run more concurrently
+# Rerank operations fall in between
+_chat_semaphore = asyncio.Semaphore(max(3, settings.max_api_concurrent // 2))
+_embed_semaphore = asyncio.Semaphore(settings.max_api_concurrent * 2)
+_rerank_semaphore = asyncio.Semaphore(settings.max_api_concurrent)
 
 
 class LLMService:
@@ -49,7 +54,7 @@ class LLMService:
         Raises:
             RuntimeError: If API call fails or returns empty response
         """
-        async with _api_semaphore:
+        async with _chat_semaphore:
             start_time = time.time()
             # Calculate input token count (rough estimate: 1 token ≈ 2 chars for Chinese)
             input_chars = sum(len(m.get("content", "")) for m in messages)
@@ -131,22 +136,38 @@ class LLMService:
                 # Don't retry for API failures, just use fallback
                 return self._get_fallback_response()
 
+            # Log the raw response for debugging
+            response_preview = repr(response_text[:200])
             logger.debug(
-                f"LLM response (attempt {attempt + 1}): {response_text[:200]}..."
+                f"LLM response (attempt {attempt + 1}): {response_preview}..."
             )
+
+            # Check if response is empty or whitespace-only before parsing
+            stripped_text = response_text.strip()
+            if not stripped_text:
+                logger.error(f"LLM returned empty/whitespace-only response on attempt {attempt + 1}")
+                if attempt == max_retries:
+                    logger.error("All retry attempts exhausted, using fallback structure")
+                    return self._get_fallback_response()
+                # Don't retry for empty responses, just use fallback immediately
+                return self._get_fallback_response()
 
             # Try to extract JSON from response
             try:
                 # Try direct parse first (strip whitespace to handle common formatting issues)
-                result = json.loads(response_text.strip())
+                result = json.loads(stripped_text)
                 logger.debug(f"Successfully parsed JSON on attempt {attempt + 1}")
                 return result
             except json.JSONDecodeError as e:
                 # Only log at debug level if it's a whitespace/prefix issue
-                if response_text.strip() != response_text and response_text.strip().startswith("{"):
+                if stripped_text != response_text and stripped_text.startswith("{"):
                     logger.debug(f"JSON decode failed (had leading/trailing whitespace), trying fallback strategies")
                 else:
-                    logger.warning(f"JSON decode failed on attempt {attempt + 1}: {str(e)}")
+                    # Log first 100 chars of stripped text to diagnose the issue
+                    logger.warning(
+                        f"JSON decode failed on attempt {attempt + 1}: {str(e)}. "
+                        f"Stripped content preview: {repr(stripped_text[:100])}"
+                    )
 
                 # Try multiple extraction strategies
                 result = self._try_extract_json(response_text)
@@ -310,7 +331,7 @@ class LLMService:
         Returns:
             List of embedding vectors
         """
-        async with _api_semaphore:
+        async with _embed_semaphore:
             start_time = time.time()
             total_chars = sum(len(t) for t in texts)
 
@@ -382,7 +403,7 @@ class LLMService:
         Returns:
             List of reranked documents with scores
         """
-        async with _api_semaphore:
+        async with _rerank_semaphore:
             start_time = time.time()
             query_preview = query[:100] + "..." if len(query) > 100 else query
 

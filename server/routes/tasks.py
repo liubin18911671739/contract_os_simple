@@ -112,6 +112,11 @@ async def cancel_task(
     session: AsyncSession = Depends(get_session),
 ) -> SuccessResponse:
     """Cancel a running task"""
+    import asyncio
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     task_service = TaskService(session)
 
     # Check if task exists
@@ -127,12 +132,30 @@ async def cancel_task(
             detail=f"Cannot cancel task with status {status}",
         )
 
-    # Set cancel flag in database
+    # Set cancel flag in database immediately
     await task_service.set_cancel_requested(task_id)
 
-    # Notify orchestrator
+    # Log the cancel request
+    await task_service.log_event(
+        task_id,
+        task.get("current_stage", "UNKNOWN"),
+        "info",
+        "Cancel requested by user",
+    )
+
+    # Notify orchestrator asynchronously (don't wait)
     orchestrator = get_orchestrator()
-    await orchestrator.cancel_task(task_id)
+
+    async def do_cancel():
+        try:
+            await orchestrator.cancel_task(task_id)
+        except Exception as e:
+            logger.error(f"Error notifying orchestrator for task {task_id}: {e}")
+
+    # Fire and forget - don't wait for orchestrator response
+    asyncio.create_task(do_cancel())
+
+    logger.info(f"Task {task_id}: Cancel requested, returning immediately")
 
     return SuccessResponse(success=True)
 
@@ -323,5 +346,61 @@ async def delete_task(
     if force:
         orchestrator = get_orchestrator()
         await orchestrator.mark_task_deleted(task_id)
+
+    return SuccessResponse(success=True)
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(
+    task_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    """Retry a failed or cancelled task
+
+    Resets the task status to QUEUED and restarts the orchestrator.
+    All previous analysis data will be overwritten during retry.
+    """
+    import asyncio
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    task_service = TaskService(session)
+
+    # Get task details
+    task = await task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check if task can be retried
+    status = task.get("status")
+    if status not in ("FAILED", "CANCELLED"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry task with status {status}. Only FAILED or CANCELLED tasks can be retried.",
+        )
+
+    # Reset task to QUEUED status
+    await task_service.update_task_progress(
+        task_id,
+        "QUEUED",
+        0,
+        status="QUEUED",
+        error_message=None,
+    )
+
+    # Log retry event
+    await task_service.log_event(
+        task_id,
+        "QUEUED",
+        "info",
+        f"Task retry requested. Previous status was {status}.",
+    )
+
+    logger.info(f"Task {task_id}: Retry requested, restarting orchestrator")
+
+    # Start orchestrator in background
+    orchestrator = get_orchestrator()
+    asyncio.create_task(orchestrator.run_task(task_id))
 
     return SuccessResponse(success=True)

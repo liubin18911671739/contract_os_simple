@@ -15,6 +15,9 @@ from ..database.models import (Clause, ConfigSnapshot, Contract,
                                ContractVersion, PrecheckTask, Risk, TaskEvent,
                                TaskKBSnapshot)
 
+# Sentinel value for distinguishing "not provided" from "explicitly set to None"
+_UNSET = object()
+
 
 class TaskService:
     """Precheck task management service"""
@@ -237,7 +240,7 @@ class TaskService:
         stage: str,
         progress: int,
         status: Optional[str] = None,
-        error_message: Optional[str] = None,
+        error_message: Optional[str] = _UNSET,
     ):
         """
         Update task progress
@@ -247,15 +250,15 @@ class TaskService:
             stage: Current stage name
             progress: Progress percentage (0-100)
             status: New status (optional)
-            error_message: Error message if failed
+            error_message: Error message if failed (pass None to clear, omit to leave unchanged)
         """
         task = await self.session.get(PrecheckTask, task_id)
         if task:
             task.current_stage = stage
             task.progress = progress
-            if status:
+            if status is not None:
                 task.status = status
-            if error_message:
+            if error_message is not _UNSET:
                 task.error_message = error_message
             task.updated_at = datetime.now(timezone.utc)
             await self.session.commit()

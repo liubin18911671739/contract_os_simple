@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     max_api_concurrent: int = 5
 
     # Task Recovery
-    task_timeout: int = 1800  # 30 minutes - mark task as failed if no update
-    task_recovery_interval: int = 600  # 10 minutes - scan for stuck tasks
+    task_timeout: int = 300  # 10 minutes - mark task as failed if no update (LLM analysis takes time)
+    task_recovery_interval: int = 60  # 1 minute - scan for stuck tasks more frequently
     task_startup_recovery: bool = True  # Enable recovery on startup
 
     # Rate Limiting

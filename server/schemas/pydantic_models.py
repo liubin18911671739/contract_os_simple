@@ -253,3 +253,46 @@ class KBDocumentResponse(BaseModel):
     indexed_count: int
     status: str
     created_at: str
+
+
+class KBSearchRequest(BaseModel):
+    """Request to search knowledge base"""
+
+    query: str = Field(..., description="Search query text", min_length=1)
+    collection_ids: List[str] = Field(default_factory=list, description="Collection IDs to search (empty = all)")
+    top_k: int = Field(6, ge=1, le=20, description="Number of results to return")
+
+
+class KBSearchResultResponse(BaseModel):
+    """KB search result response"""
+
+    chunk_id: str
+    text: str = Field(..., description="Matching text snippet")
+    score: float = Field(..., description="Similarity score (0-1)")
+    doc_title: str
+    doc_version: int
+    doc_id: Optional[str] = None
+    collection_id: Optional[str] = None
+
+
+class KBChunkResponse(BaseModel):
+    """KB chunk response"""
+
+    id: str
+    document_id: str
+    chunk_index: int
+    text: str
+    is_indexed: bool
+    created_at: str
+
+
+class KBCollectionStatsResponse(BaseModel):
+    """KB collection statistics response"""
+
+    id: str
+    name: str
+    document_count: int
+    chunk_count: int
+    indexed_count: int
+    avg_chunk_size: float
+    total_storage_mb: float
