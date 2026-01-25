@@ -11,9 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database.connection import get_session
 from ..database.models import PrecheckTask, Risk
 from ..schemas.pydantic_models import (
+    BaselineComparisonResponse,
     F1ScoreResponse,
     HallucinationRateResponse,
     MetricsOverviewResponse,
+    RiskAssessmentResponse,
+    RiskLevelStats,
 )
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -287,4 +290,217 @@ async def get_hallucination_rate(
     return HallucinationRateResponse(
         rate=round(current_rate, 1),
         trend=round(trend, 1),
+    )
+
+
+@router.get("/baseline-comparison")
+async def get_baseline_comparison(
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    session: AsyncSession = Depends(get_session),
+) -> BaselineComparisonResponse:
+    """
+    Get baseline comparison - compare current period with previous period
+
+    Returns F1, precision, recall, and hallucination metrics for both periods
+    with percentage changes
+    """
+    # Parse current period dates
+    current_start = datetime.fromisoformat(from_date)
+    current_end = datetime.fromisoformat(to_date) + timedelta(days=1)
+    period_days = (current_end - current_start).days
+
+    # Calculate baseline period (previous period of same length)
+    baseline_start = current_start - timedelta(days=period_days)
+    baseline_end = current_start
+
+    def get_period_metrics(start_dt, end_dt):
+        """Get F1, precision, recall, hallucination for a period"""
+        # Total risks in period
+        total_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(PrecheckTask.created_at >= start_dt, PrecheckTask.created_at < end_dt)
+        )
+        total_result = session.execute(total_query)
+        total = total_result.scalar() or 0
+
+        # Confirmed risks (TP)
+        confirmed_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(
+                PrecheckTask.created_at >= start_dt,
+                PrecheckTask.created_at < end_dt,
+                Risk.status == "CONFIRMED",
+            )
+        )
+        confirmed_result = session.execute(confirmed_query)
+        tp = confirmed_result.scalar() or 0
+
+        # Dismissed risks (FP)
+        dismissed_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(
+                PrecheckTask.created_at >= start_dt,
+                PrecheckTask.created_at < end_dt,
+                Risk.status == "DISMISSED",
+            )
+        )
+        dismissed_result = session.execute(dismissed_query)
+        fp = dismissed_result.scalar() or 0
+
+        # Calculate metrics
+        reviewed = tp + fp
+        precision = tp / reviewed if reviewed > 0 else 0.0
+        recall = precision  # Simplified
+        f1 = (2 * precision * recall / (precision + recall)
+               if (precision + recall) > 0 else 0.0)
+        hallucination = fp / total if total > 0 else 0.0
+
+        return {
+            "f1": round(f1 * 100, 1),
+            "precision": round(precision * 100, 1),
+            "recall": round(recall * 100, 1),
+            "hallucination": round(hallucination * 100, 1),
+        }
+
+    # Get current period metrics
+    current = await get_period_metrics(current_start, current_end)
+
+    # Get baseline period metrics
+    baseline = await get_period_metrics(baseline_start, baseline_end)
+
+    return BaselineComparisonResponse(
+        current_f1=current["f1"],
+        baseline_f1=baseline["f1"],
+        f1_change=round(current["f1"] - baseline["f1"], 1),
+        current_precision=current["precision"],
+        baseline_precision=baseline["precision"],
+        precision_change=round(current["precision"] - baseline["precision"], 1),
+        current_recall=current["recall"],
+        baseline_recall=baseline["recall"],
+        recall_change=round(current["recall"] - baseline["recall"], 1),
+        current_hallucination=current["hallucination"],
+        baseline_hallucination=baseline["hallucination"],
+        hallucination_change=round(current["hallucination"] - baseline["hallucination"], 1),
+        current_period={"start": from_date, "end": to_date},
+        baseline_period={
+            "start": baseline_start.strftime("%Y-%m-%d"),
+            "end": baseline_end.strftime("%Y-%m-%d"),
+        },
+    )
+
+
+@router.get("/risk-assessment")
+async def get_risk_assessment(
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    session: AsyncSession = Depends(get_session),
+) -> RiskAssessmentResponse:
+    """
+    Get detailed risk assessment metrics
+
+    Returns:
+    - Statistics by risk level (HIGH, MEDIUM, LOW, INFO)
+    - Risk type distribution
+    - Overall confirmation rate
+    - Overall accuracy rate
+    """
+    start_dt = datetime.fromisoformat(from_date)
+    end_dt = datetime.fromisoformat(to_date) + timedelta(days=1)
+
+    # Get stats by risk level
+    by_level = {}
+    risk_levels = ["HIGH", "MEDIUM", "LOW", "INFO"]
+    overall_confirmed = 0
+    overall_total = 0
+
+    for level in risk_levels:
+        # Total risks at this level
+        total_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(
+                PrecheckTask.created_at >= start_dt,
+                PrecheckTask.created_at < end_dt,
+                Risk.risk_level == level,
+            )
+        )
+        total_result = await session.execute(total_query)
+        total = total_result.scalar() or 0
+
+        # Confirmed at this level
+        confirmed_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(
+                PrecheckTask.created_at >= start_dt,
+                PrecheckTask.created_at < end_dt,
+                Risk.risk_level == level,
+                Risk.status == "CONFIRMED",
+            )
+        )
+        confirmed_result = await session.execute(confirmed_query)
+        confirmed = confirmed_result.scalar() or 0
+
+        # Dismissed at this level
+        dismissed_query = (
+            select(func.count(Risk.id))
+            .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+            .where(
+                PrecheckTask.created_at >= start_dt,
+                PrecheckTask.created_at < end_dt,
+                Risk.risk_level == level,
+                Risk.status == "DISMISSED",
+            )
+        )
+        dismissed_result = await session.execute(dismissed_query)
+        dismissed = dismissed_result.scalar() or 0
+
+        # Pending at this level
+        pending = total - confirmed - dismissed
+
+        # Calculate rates
+        confirmation_rate = (confirmed / total * 100) if total > 0 else 0.0
+        accuracy_rate = confirmation_rate  # Confirmed as proxy for accuracy
+
+        by_level[level] = RiskLevelStats(
+            total=total,
+            confirmed=confirmed,
+            dismissed=dismissed,
+            pending=max(0, pending),
+            confirmation_rate=round(confirmation_rate, 1),
+            accuracy_rate=round(accuracy_rate, 1),
+        )
+
+        overall_confirmed += confirmed
+        overall_total += total
+
+    # Get risk type distribution
+    type_query = (
+        select(Risk.risk_type, func.count(Risk.id))
+        .join(PrecheckTask, Risk.task_id == PrecheckTask.id)
+        .where(
+            PrecheckTask.created_at >= start_dt,
+            PrecheckTask.created_at < end_dt,
+        )
+        .group_by(Risk.risk_type)
+    )
+    type_result = await session.execute(type_query)
+    by_type = {row[0]: row[1] for row in type_result.all()}
+
+    # Calculate overall rates
+    overall_confirmation_rate = (
+        overall_confirmed / overall_total * 100 if overall_total > 0 else 0.0
+    )
+    overall_accuracy = overall_confirmation_rate
+
+    return RiskAssessmentResponse(
+        by_level=by_level,
+        by_type=by_type,
+        overall_confirmation_rate=round(overall_confirmation_rate, 1),
+        overall_accuracy=round(overall_accuracy, 1),
+        period={"start": from_date, "end": to_date},
     )

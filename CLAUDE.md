@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Contract OS Simple is a contract pre-review system that processes contracts through an 8-stage AI-powered pipeline to identify legal risks. This is a Python/FastAPI refactor of an original Node.js system, maintaining 100% API compatibility with the frontend.
+Contract OS Simple is a contract pre-review system that processes contracts through a 9-stage AI-powered pipeline to identify legal risks. This is a Python/FastAPI refactor of an original Node.js system, maintaining 100% API compatibility with the frontend.
 
 **Key Architecture Decisions:**
 - **Backend**: Python 3.11+ / FastAPI (replaces Node.js/Fastify)
@@ -125,7 +125,7 @@ docker-compose up -d --build
 
 ## Architecture
 
-### 8-Stage Task Pipeline
+### 9-Stage Task Pipeline
 
 The core of the system is the orchestrator (`server/orchestrator.py`) which runs tasks through these stages:
 
@@ -134,9 +134,10 @@ The core of the system is the orchestrator (`server/orchestrator.py`) which runs
 3. **RULE_SCORING** (37%) - Keyword/regex risk detection using `stub_agents.py`
 4. **KB_RETRIEVAL** (50%) - Faiss vector search + ZhipuAI Rerank using `stub_agents.py`
 5. **LLM_RISK** (75%) - AI-powered risk analysis using `llm_risk_agent.py` (KEY STAGE)
-6. **EVIDENCING** (87%) - Evidence chain collection using `stub_agents.py`
-7. **QCING** (95%) - Quality control checks using `stub_agents.py`
-8. **DONE** (100%) - Task completion using `stub_agents.py`
+6. **SUGGESTION** (82%) - Generate modification suggestions using `suggestion_agent.py`
+7. **EVIDENCING** (87%) - Evidence chain collection using `stub_agents.py`
+8. **QCING** (95%) - Quality control checks using `stub_agents.py`
+9. **DONE** (100%) - Task completion using `stub_agents.py`
 
 **Critical Flow**: When a task is created via `POST /api/precheck-tasks`, the orchestrator is started in background using `asyncio.create_task()`. Each agent receives the task_id and a payload dict that accumulates results from previous stages.
 
@@ -172,13 +173,20 @@ Services (`server/services/`) are business logic layer:
   - Logs events to `task_events` table
   - Retrieves KB collection IDs for task
 
+- **SuggestionService** (`suggestion_service.py`) - Suggestion and risk management:
+  - CRUD operations for modification suggestions
+  - Suggestion revision tracking
+  - Risk level adjustment with history
+  - Evidence chain retrieval
+
 ### Database Models
 
 All models defined in `server/database/models.py` using SQLAlchemy declarative base. Key relationships:
 - `PrecheckTask` → `ContractVersion` (many-to-one)
 - `PrecheckTask` → `Clause` (one-to-many)
 - `Clause` → `Risk` (one-to-many)
-- `Risk` → `Evidence`, `RuleHit`, `KBCitation` (one-to-many)
+- `Risk` → `Evidence`, `RuleHit`, `KBCitation`, `Suggestion` (one-to-many)
+- `Suggestion` → `SuggestionRevision` (one-to-many)
 - `PrecheckTask` → `TaskKBSnapshot` (one-to-many)
 
 **Important**: `KBCitation.chunk_id` is nullable to handle LLM hallucination of invalid chunk IDs. The LLM risk agent validates chunk_ids against actual KB hits before creating citations.
@@ -213,6 +221,15 @@ Key endpoints:
 - `GET /api/metrics/overview` - Metrics dashboard data
 - `GET /api/metrics/f1-score` - F1 score based on risk confirmation
 - `GET /api/metrics/hallucination-rate` - Hallucination rate metrics
+
+### Suggestion API Endpoints
+
+- `GET /api/risks/{risk_id}/suggestions` - Get suggestions for a risk
+- `POST /api/risks/{risk_id}/suggestions` - Create new suggestion
+- `PUT /api/suggestions/{suggestion_id}` - Update suggestion (creates revision)
+- `GET /api/suggestions/{suggestion_id}/revisions` - Get revision history
+- `PUT /api/risks/{risk_id}/level` - Adjust risk level
+- `GET /api/risks/{risk_id}/evidence-chain` - Get complete evidence chain
 
 ## Configuration
 
@@ -314,6 +331,24 @@ The LLM often returns invalid `chunk_id` values (like descriptive text instead o
 
 This prevents FOREIGN KEY constraint errors in `kb_citations` table.
 
+### Suggestion Generation Pipeline
+
+The `SuggestionAgent` (`server/agents/suggestion_agent.py`) generates modification suggestions for each risk:
+- Runs at SUGGESTION stage (82%) after LLM_RISK completes
+- Uses LLM to generate contextual suggestions based on risk summary, KB citations, and rule hits
+- Falls back to generic template suggestions if LLM fails
+- Batch commits suggestions to database with `created_by='ai'` or `created_by='ai_fallback'`
+
+### Risk Level Adjustment Tracking
+
+Risk level adjustments are tracked through the `qc_flags_json` field on the Risk model:
+- `original_risk_level`: Stores the AI-generated level when first adjusted
+- `adjusted_at`: Timestamp of adjustment
+- `adjusted_by`: User or system that made the adjustment
+- `adjustment_reason`: Optional reason for the adjustment
+
+This allows full audit trail of risk level changes.
+
 ## Common Issues
 
 - **SQLite locked**: Ensure WAL mode enabled (check `connection.py`)
@@ -332,17 +367,29 @@ This prevents FOREIGN KEY constraint errors in `kb_citations` table.
 - `KBAdmin.tsx` - Knowledge base management
 - `NewTaskUpload.tsx` - Create new precheck task
 - `Processing.tsx` - Monitor task progress
-- `Results.tsx` - View task results and risks
+- `Results.tsx` - View task results and risks (with inline suggestion preview)
 - `Review.tsx` - Review and confirm/dismiss risks
+- `SuggestionReview.tsx` - Dedicated page for reviewing all suggestions with filtering
 - `Evaluation.tsx` - Metrics dashboard (F1, hallucination rate)
 - `Settings.tsx` - Application settings
 
 **Components** (`client/src/components/`):
-- `ui/` - Reusable UI components (Button, Card, Modal, Table, etc.)
+- `ui/` - Reusable UI components (Button, Card, Modal, Table, Badge, etc.)
 - `kb/` - Knowledge base specific components (Search, DocumentChunks, etc.)
+- `suggestions/` - Suggestion feature components:
+  - `EvidenceChain.tsx` - Timeline visualization of complete evidence chain
+  - `SuggestionCard.tsx` - Individual suggestion display card
+  - `SuggestionEditor.tsx` - Modal editor for editing suggestions
+  - `RevisionHistory.tsx` - Revision history viewer with timeline
+  - `RiskLevelAdjuster.tsx` - Interactive risk level adjuster
 - `layout/` - Layout components (Header, Sidebar, MainLayout)
 
 **State Management**: Zustand stores in `client/src/api/` for API communication
+
+**Frontend API Client** (`client/src/api/`):
+- `http.ts` - HTTP client with get/post/put/del methods and logging
+- `tasks.ts` - Task-related API calls
+- `suggestions.ts` - Suggestion and evidence chain API calls
 
 ## Testing Configuration
 

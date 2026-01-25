@@ -63,9 +63,9 @@ export default function Review() {
         <div className="bg-white rounded-lg shadow p-4">
           <h3 className="font-medium mb-3">Clauses</h3>
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {clauses.map((clause: any, index: number) => (
+            {clauses.map((clause: any) => (
               <div
-                key={index}
+                key={clause.id}
                 onClick={() => setSelectedClause(clause)}
                 className={`p-3 rounded cursor-pointer ${
                   selectedClause?.clause_id === clause.clause_id

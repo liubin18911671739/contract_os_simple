@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Trash2 } from 'lucide-react';
+import React from 'react';
+import { Trash2, ChevronDown, ChevronUp, Lightbulb } from 'lucide-react';
 import {
   getTask,
   getTaskSummary,
@@ -9,9 +10,13 @@ import {
   getReportDownloadUrl,
   deleteTask,
 } from '../api/tasks';
+import { getEvidenceChain, getSuggestions, EvidenceChain as EvidenceChainType } from '../api/suggestions';
 import { Button } from '../components/ui/Button';
 import { RiskBadge } from '../components/ui/Badge';
 import { Alert } from '../components/ui/Alert';
+import { Modal } from '../components/ui/Modal';
+import { EvidenceChain } from '../components/suggestions/EvidenceChain';
+import { SuggestionCard } from '../components/suggestions/SuggestionCard';
 import {
   Table,
   TableHead,
@@ -34,6 +39,19 @@ export default function Results() {
     text: string;
   } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Suggestion and evidence chain state
+  const [expandedClauses, setExpandedClauses] = useState<Set<string>>(new Set());
+  const [clauseSuggestions, setClauseSuggestions] = useState<Map<string, any[]>>(new Map());
+  const [loadingSuggestions, setLoadingSuggestions] = useState<Set<string>>(new Set());
+
+  // Evidence chain modal state
+  const [evidenceChainModal, setEvidenceChainModal] = useState<{
+    riskId: string;
+    clauseTitle: string;
+  } | null>(null);
+  const [evidenceChain, setEvidenceChain] = useState<EvidenceChainType | null>(null);
+  const [loadingEvidenceChain, setLoadingEvidenceChain] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
@@ -71,6 +89,99 @@ export default function Results() {
       setDeleteLoading(false);
     }
   }
+
+  // Toggle clause expansion to show suggestions
+  const toggleClauseExpansion = async (clauseId: string, riskId: string | null) => {
+    const newExpanded = new Set(expandedClauses);
+    const isExpanding = !newExpanded.has(clauseId);
+
+    if (isExpanding) {
+      newExpanded.add(clauseId);
+      // Load suggestions for this clause's risk
+      if (riskId && !clauseSuggestions.has(clauseId)) {
+        setLoadingSuggestions((prev) => new Set(prev).add(clauseId));
+        try {
+          const suggestions = await getSuggestions(riskId);
+          setClauseSuggestions((prev) => new Map(prev).set(clauseId, suggestions));
+        } catch (error) {
+          console.error('Failed to load suggestions:', error);
+        } finally {
+          setLoadingSuggestions((prev) => {
+            const next = new Set(prev);
+            next.delete(clauseId);
+            return next;
+          });
+        }
+      }
+    } else {
+      newExpanded.delete(clauseId);
+    }
+    setExpandedClauses(newExpanded);
+  };
+
+  // View evidence chain for a risk
+  const viewEvidenceChain = async (riskId: string, clauseTitle: string) => {
+    setEvidenceChainModal({ riskId, clauseTitle });
+    setEvidenceChain(null);
+    setLoadingEvidenceChain(true);
+    try {
+      const chain = await getEvidenceChain(riskId);
+      setEvidenceChain(chain);
+    } catch (error) {
+      console.error('Failed to load evidence chain:', error);
+      setReportMessage({
+        type: 'error',
+        text: '加载证据链失败',
+      });
+      setEvidenceChainModal(null);
+    } finally {
+      setLoadingEvidenceChain(false);
+    }
+  };
+
+  // Handle editing a suggestion (delegate to parent component)
+  const handleEditSuggestion = async (_suggestionId: string, _newText: string) => {
+    // This will be handled by the EvidenceChain component's internal logic
+    // For now, just close the modal and reload
+    setEvidenceChainModal(null);
+    // Reload suggestions for expanded clauses
+    for (const [clauseId, riskId] of clauses.map((c) => [c.id, c.risk_id])) {
+      if (expandedClauses.has(clauseId) && riskId) {
+        setLoadingSuggestions((prev) => new Set(prev).add(clauseId));
+        try {
+          const suggestions = await getSuggestions(riskId);
+          setClauseSuggestions((prev) => new Map(prev).set(clauseId, suggestions));
+        } catch (error) {
+          console.error('Failed to reload suggestions:', error);
+        } finally {
+          setLoadingSuggestions((prev) => {
+            const next = new Set(prev);
+            next.delete(clauseId);
+            return next;
+          });
+        }
+      }
+    }
+  };
+
+  // Handle adjusting risk level
+  const handleAdjustRiskLevel = async (riskId: string, newLevel: string, reason?: string) => {
+    // This will be handled by the EvidenceChain component
+    // After adjustment, reload the evidence chain
+    if (evidenceChainModal) {
+      setLoadingEvidenceChain(true);
+      try {
+        const chain = await getEvidenceChain(riskId);
+        setEvidenceChain(chain);
+        // Update summary to reflect changes
+        load();
+      } catch (error) {
+        console.error('Failed to reload evidence chain:', error);
+      } finally {
+        setLoadingEvidenceChain(false);
+      }
+    }
+  };
 
   async function handleGenerateReport(format: 'html' | 'json') {
     setGeneratingReport(true);
@@ -172,7 +283,13 @@ export default function Results() {
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-medium">Risks by Clause</h3>
-            <select
+            <div className="flex items-center gap-3">
+              <Link to={`/suggestion-review/${taskId}`}>
+                <Button size="sm" variant="accent">
+                  建议审核
+                </Button>
+              </Link>
+              <select
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
@@ -183,6 +300,7 @@ export default function Results() {
               <option value="LOW">Low</option>
               <option value="INFO">Info</option>
             </select>
+            </div>
           </div>
         </div>
 
@@ -202,43 +320,142 @@ export default function Results() {
                 </TableCell>
               </TableRow>
             ) : (
-              clauses.map((clause: any, index: number) => (
-                <TableRow key={index}>
-                  <TableCell>
-                    <div className="font-medium">{clause.title || 'Unnamed Clause'}</div>
-                    <div className="text-xs text-gray-500">{clause.clause_id}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="max-w-md truncate">{clause.summary || 'No risk detected'}</div>
-                  </TableCell>
-                  <TableCell>
-                    {clause.risk_level ? <RiskBadge level={clause.risk_level} /> : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full ${
-                        clause.status === 'CONFIRMED'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {clause.status || 'PENDING'}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {clause.risk_id && (
-                      <Link to={`/review/${taskId}`}>
-                        <Button size="sm" variant="ghost">
-                          Review
-                        </Button>
-                      </Link>
+              clauses.map((clause: any) => {
+                const isExpanded = expandedClauses.has(clause.id);
+                const suggestions = clauseSuggestions.get(clause.id) || [];
+                const isLoadingSuggestions = loadingSuggestions.has(clause.id);
+
+                return (
+                  <React.Fragment key={clause.id}>
+                    {/* Main row */}
+                    <TableRow>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {clause.risk_id && (
+                            <button
+                              onClick={() => toggleClauseExpansion(clause.id, clause.risk_id)}
+                              className="text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
+                          <div>
+                            <div className="font-medium">{clause.title || 'Unnamed Clause'}</div>
+                            <div className="text-xs text-gray-500">{clause.clause_id}</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="max-w-md truncate">{clause.summary || 'No risk detected'}</div>
+                      </TableCell>
+                      <TableCell>
+                        {clause.risk_level ? <RiskBadge level={clause.risk_level} /> : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`text-xs px-2 py-1 rounded-full ${
+                            clause.status === 'CONFIRMED'
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}
+                        >
+                          {clause.status || 'PENDING'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {clause.risk_id && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => viewEvidenceChain(clause.risk_id, clause.title || 'Unnamed Clause')}
+                              >
+                                证据链
+                              </Button>
+                              <Link to={`/review/${taskId}`}>
+                                <Button size="sm" variant="ghost">
+                                  Review
+                                </Button>
+                              </Link>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Expanded row with suggestions */}
+                    {isExpanded && clause.risk_id && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="bg-gray-50">
+                          <div className="py-3 px-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Lightbulb className="w-4 h-4 text-purple-600" />
+                              <span className="text-sm font-medium text-gray-700">修改建议</span>
+                              <span className="text-xs text-gray-500">({suggestions.length}条)</span>
+                            </div>
+                            {isLoadingSuggestions ? (
+                              <div className="text-sm text-gray-500">加载中...</div>
+                            ) : suggestions.length > 0 ? (
+                              <div className="grid grid-cols-1 gap-3">
+                                {suggestions.map((suggestion: any) => (
+                                  <SuggestionCard
+                                    key={suggestion.id}
+                                    suggestion={suggestion}
+                                    compact
+                                    showActions={false}
+                                  />
+                                ))}
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => viewEvidenceChain(clause.risk_id, clause.title || 'Unnamed Clause')}
+                                  className="w-full"
+                                >
+                                  查看完整证据链和编辑建议
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="text-sm text-gray-500">暂无修改建议</div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </TableCell>
-                </TableRow>
-              ))
+                  </React.Fragment>
+                );
+              })
             )}
           </TableBody>
         </Table>
+
+        {/* Evidence Chain Modal */}
+        {evidenceChainModal && (
+          <Modal
+            isOpen={!!evidenceChainModal}
+            onClose={() => setEvidenceChainModal(null)}
+            title={`证据链: ${evidenceChainModal.clauseTitle}`}
+            size="xl"
+          >
+            <div className="max-h-[70vh] overflow-y-auto">
+              {loadingEvidenceChain ? (
+                <div className="text-center py-8 text-gray-500">加载证据链中...</div>
+              ) : evidenceChain ? (
+                <EvidenceChain
+                  evidenceChain={evidenceChain}
+                  onEditSuggestion={handleEditSuggestion}
+                  onAdjustRiskLevel={handleAdjustRiskLevel}
+                />
+              ) : (
+                <div className="text-center py-8 text-gray-500">无法加载证据链</div>
+              )}
+            </div>
+          </Modal>
+        )}
       </div>
 
       {isTaskComplete && (

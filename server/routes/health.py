@@ -2,7 +2,7 @@
 Health check routes
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
@@ -17,7 +17,7 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
 

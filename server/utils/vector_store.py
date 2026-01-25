@@ -50,6 +50,16 @@ class FaissVectorStore:
 
             with open(self.metadata_path, "rb") as f:
                 metadata = pickle.load(f)
+                # Validate metadata structure to prevent security issues
+                if not isinstance(metadata, dict):
+                    raise ValueError(f"Invalid metadata format for collection {self.collection_id}")
+                if "chunk_ids" not in metadata:
+                    raise ValueError(f"Missing chunk_ids in metadata for collection {self.collection_id}")
+                if not isinstance(metadata["chunk_ids"], list):
+                    raise ValueError(f"chunk_ids must be a list for collection {self.collection_id}")
+                # Validate all chunk_ids are strings
+                if not all(isinstance(cid, str) for cid in metadata["chunk_ids"]):
+                    raise ValueError(f"All chunk_ids must be strings for collection {self.collection_id}")
                 self.chunk_ids = metadata["chunk_ids"]
 
             print(

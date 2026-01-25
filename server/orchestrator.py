@@ -20,6 +20,7 @@ from .agents.report_agent import ReportAgent
 from .agents.split_agent import SplitAgent
 from .agents.stub_agents import (EvidenceAgent, KBRetrievalAgent, QCAgent,
                                  RulesAgent)
+from .agents.suggestion_agent import SuggestionAgent
 from .config import settings
 from .database.connection import get_session_maker
 from .database.models import PrecheckTask
@@ -35,6 +36,7 @@ STAGE_PROGRESS = {
     "RULE_SCORING": 37,
     "KB_RETRIEVAL": 50,
     "LLM_RISK": 75,
+    "SUGGESTION": 82,
     "EVIDENCING": 87,
     "QCING": 95,
     "DONE": 100,
@@ -50,6 +52,7 @@ AGENT_CLASSES = {
     "RULE_SCORING": RulesAgent,
     "KB_RETRIEVAL": KBRetrievalAgent,
     "LLM_RISK": LLMRiskAgent,
+    "SUGGESTION": SuggestionAgent,
     "EVIDENCING": EvidenceAgent,
     "QCING": QCAgent,
     "DONE": ReportAgent,

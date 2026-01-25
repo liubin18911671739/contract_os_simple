@@ -93,7 +93,7 @@ export default function KBAdmin() {
     }
   }, [documents]);
 
-  async function loadData() {
+  async function loadData(): Promise<void> {
     try {
       const [collectionsData, documentsData] = await Promise.all([
         getKBCollections(),

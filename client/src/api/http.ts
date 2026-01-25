@@ -129,6 +129,36 @@ export async function del<T>(path: string): Promise<T> {
   }
 }
 
+export async function put<T>(path: string, data?: any): Promise<T> {
+  const requestId = startTiming('PUT', path);
+  let status = 0;
+
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    status = response.status;
+    endTiming(requestId, status);
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const errorDetail = getErrorCode(status, responseText);
+      log.apiError('PUT', path, new Error(errorDetail), endTiming(requestId, status));
+      throw new Error(errorDetail);
+    }
+    return response.json();
+  } catch (error: any) {
+    if (status === 0) {
+      log.apiError('PUT', path, error);
+    }
+    throw error;
+  }
+}
+
 export async function uploadFile<T>(
   path: string,
   file: File,

@@ -12,6 +12,7 @@ from server.config import settings
 from server.database.connection import close_db, init_db
 from server.rate_limit import RATE_LIMITS, limiter
 from server.routes import contracts, dashboard, health, kb, metrics, tasks
+from server.routes import suggestions
 
 # Configure logging
 logging.basicConfig(
@@ -122,6 +123,7 @@ app.include_router(kb.router)
 app.include_router(dashboard.router)
 app.include_router(metrics.router)
 app.include_router(health.router)
+app.include_router(suggestions.router)
 
 
 # Custom docs endpoints with better error handling

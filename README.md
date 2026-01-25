@@ -42,16 +42,20 @@
 
 - ✅ 合同管理与版本控制
 - ✅ 知识库管理与文档导入
-- ✅ 8 阶段任务处理流程
+- ✅ 9 阶段任务处理流程
   1. **PARSING** - 从 PDF/DOCX/TXT 提取文本
   2. **STRUCTURING** - 将合同分割为条款
   3. **RULE_SCORING** - 基于关键词/正则的风险检测
   4. **KB_RETRIEVAL** - Faiss 向量搜索 + 智谱AI Rerank
   5. **LLM_RISK** - AI 驱动的风险分析
-  6. **EVIDENCING** - 证据链收集
-  7. **QCING** - 质量控制检查
-  8. **DONE** - 任务完成
+  6. **SUGGESTION** - AI 生成修改建议
+  7. **EVIDENCING** - 证据链收集
+  8. **QCING** - 质量控制检查
+  9. **DONE** - 任务完成
 - ✅ 带证据和 KB 引用的风险分析
+- ✅ AI 生成的修改建议
+- ✅ 风险等级调整功能
+- ✅ 建议修订历史追踪
 - ✅ 报告生成
 
 ## 项目结构
@@ -71,11 +75,12 @@ contract_os_simple/
 │   │   ├── task_service.py   # 任务管理
 │   │   ├── contract_service.py # 合同管理
 │   │   └── file_service.py   # 文件存储
-│   ├── agents/               # 8 个处理代理
+│   ├── agents/               # 9 个处理代理
 │   │   ├── base.py           # Agent 基类
 │   │   ├── parse_agent.py    # 文件解析
 │   │   ├── split_agent.py    # 条款切分
 │   │   ├── llm_risk_agent.py # LLM 风险分析
+│   │   ├── suggestion_agent.py # AI 修改建议生成
 │   │   └── stub_agents.py    # 其他 Agent
 │   ├── orchestrator.py       # 任务编排器
 │   ├── routes/               # API 端点
@@ -224,6 +229,16 @@ open htmlcov/index.html  # macOS
 - `GET /api/precheck-tasks/{id}/clauses` - 获取任务条款
 - `POST /api/precheck-tasks/{id}/conclusion` - 设置结论
 - `POST /api/precheck-tasks/{id}/report` - 生成报告
+- `DELETE /api/precheck-tasks/{id}?force=true` - 删除任务（强制）
+
+### 建议 & 风险等级
+
+- `GET /api/risks/{risk_id}/suggestions` - 获取风险的建议列表
+- `POST /api/risks/{risk_id}/suggestions` - 创建新建议
+- `PUT /api/suggestions/{suggestion_id}` - 更新建议（创建修订版本）
+- `GET /api/suggestions/{suggestion_id}/revisions` - 获取建议修订历史
+- `PUT /api/risks/{risk_id}/level` - 调整风险等级
+- `GET /api/risks/{risk_id}/evidence-chain` - 获取完整证据链
 
 ### 知识库
 

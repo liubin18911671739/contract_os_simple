@@ -3,7 +3,7 @@ SQLAlchemy ORM models for Contract OS Simple
 Based on the original PostgreSQL schema
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (JSON, Boolean, CheckConstraint, DateTime, Float,
@@ -24,7 +24,7 @@ class Contract(Base):
     contract_name: Mapped[str] = mapped_column(String, nullable=False)
     counterparty: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     contract_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     versions: Mapped[list["ContractVersion"]] = relationship(
@@ -45,7 +45,7 @@ class ContractVersion(Base):
     object_key: Mapped[str] = mapped_column(String, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
     mime: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     contract: Mapped["Contract"] = relationship("Contract", back_populates="versions")
@@ -67,7 +67,7 @@ class ConfigSnapshot(Base):
     model_config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     prompt_template_version: Mapped[str] = mapped_column(String, nullable=False)
     kb_collection_versions_json: Mapped[dict] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     precheck_tasks: Mapped[list["PrecheckTask"]] = relationship(
@@ -98,9 +98,9 @@ class PrecheckTask(Base):
     kb_mode: Mapped[str] = mapped_column(String, nullable=False)
 
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
 
     __table_args__ = (
@@ -149,7 +149,7 @@ class TaskEvent(Base):
     task_id: Mapped[str] = mapped_column(
         String, ForeignKey("precheck_tasks.id", ondelete="CASCADE"), nullable=False
     )
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     stage: Mapped[str] = mapped_column(String, nullable=False)
     level: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -178,7 +178,7 @@ class TaskKBSnapshot(Base):
     )
     collection_id: Mapped[str] = mapped_column(String, nullable=False)
     collection_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    frozen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    frozen_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index(
@@ -271,7 +271,7 @@ class Risk(Base):
     )
 
     qc_flags_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     task: Mapped["PrecheckTask"] = relationship("PrecheckTask", back_populates="risks")
@@ -357,7 +357,7 @@ class KBCollection(Base):
 
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     documents: Mapped[list["KBDocument"]] = relationship(
@@ -379,7 +379,7 @@ class KBDocument(Base):
     object_key: Mapped[str] = mapped_column(String, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     hash: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (Index("idx_kb_documents_collection_id", "collection_id"),)
 
@@ -447,7 +447,7 @@ class KBCitation(Base):
     score: Mapped[float] = mapped_column(Float, nullable=False)
     quote_text: Mapped[str] = mapped_column(Text, nullable=False)
     doc_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_kb_citations_risk_id", "risk_id"),
@@ -478,7 +478,7 @@ class KBHitTemp(Base):
     quote_text: Mapped[str] = mapped_column(Text, nullable=False)
     doc_title: Mapped[str] = mapped_column(String, nullable=False)
     doc_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (Index("idx_kb_hits_temp_task_clause", "task_id", "clause_id"),)
 
@@ -504,7 +504,7 @@ class Suggestion(Base):
     )
     suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     risk: Mapped["Risk"] = relationship("Risk", back_populates="suggestions")
@@ -525,7 +525,7 @@ class SuggestionRevision(Base):
     revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
     suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index(
@@ -562,7 +562,7 @@ class Review(Base):
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     task: Mapped["PrecheckTask"] = relationship(
@@ -581,7 +581,7 @@ class Report(Base):
     )
     object_key: Mapped[str] = mapped_column(String, nullable=False)
     template_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     task: Mapped["PrecheckTask"] = relationship(
@@ -599,7 +599,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String, nullable=False)
     object_type: Mapped[str] = mapped_column(String, nullable=False)
     object_id: Mapped[str] = mapped_column(String, nullable=False)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     meta_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
     __table_args__ = (Index("idx_audit_logs_object", "object_type", "object_id"),)

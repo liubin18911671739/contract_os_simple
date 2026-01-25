@@ -239,6 +239,55 @@ class HallucinationRateResponse(BaseModel):
     trend: float
 
 
+class BaselineComparisonResponse(BaseModel):
+    """Baseline comparison response - compare current period with baseline"""
+
+    # F1 Score metrics
+    current_f1: float
+    baseline_f1: float
+    f1_change: float  # percentage change
+
+    # Precision metrics
+    current_precision: float
+    baseline_precision: float
+    precision_change: float
+
+    # Recall metrics
+    current_recall: float
+    baseline_recall: float
+    recall_change: float
+
+    # Hallucination metrics
+    current_hallucination: float
+    baseline_hallucination: float
+    hallucination_change: float
+
+    # Period info
+    current_period: dict[str, str]
+    baseline_period: dict[str, str]
+
+
+class RiskLevelStats(BaseModel):
+    """Statistics for a single risk level"""
+
+    total: int
+    confirmed: int
+    dismissed: int
+    pending: int
+    confirmation_rate: float
+    accuracy_rate: float
+
+
+class RiskAssessmentResponse(BaseModel):
+    """Detailed risk assessment response"""
+
+    by_level: dict[str, RiskLevelStats]
+    by_type: dict[str, int]  # risk_type -> count
+    overall_confirmation_rate: float
+    overall_accuracy: float
+    period: dict[str, str]
+
+
 # ==================== KB Document Models ====================
 
 
@@ -296,3 +345,124 @@ class KBCollectionStatsResponse(BaseModel):
     indexed_count: int
     avg_chunk_size: float
     total_storage_mb: float
+
+
+# ==================== Suggestion Models ====================
+
+
+class SuggestionResponse(BaseModel):
+    """Suggestion response"""
+
+    id: str
+    risk_id: str
+    suggestion_text: str
+    created_by: Optional[str]
+    created_at: str
+    revision_count: int
+
+
+class CreateSuggestionRequest(BaseModel):
+    """Request to create a suggestion"""
+
+    suggestion_text: str = Field(..., description="Suggestion text")
+
+
+class UpdateSuggestionRequest(BaseModel):
+    """Request to update a suggestion"""
+
+    suggestion_text: str = Field(..., description="Updated suggestion text")
+
+
+class SuggestionRevisionResponse(BaseModel):
+    """Suggestion revision response"""
+
+    id: str
+    suggestion_id: str
+    revision_no: int
+    suggestion_text: str
+    created_by: Optional[str]
+    created_at: str
+
+
+class AdjustRiskLevelRequest(BaseModel):
+    """Request to adjust risk level"""
+
+    risk_level: str = Field(..., description="New risk level: HIGH, MEDIUM, LOW, or INFO")
+    reason: Optional[str] = Field(None, description="Reason for adjustment")
+
+
+class RiskAdjustmentResponse(BaseModel):
+    """Risk adjustment response"""
+
+    id: str
+    risk_level: str
+    original_risk_level: Optional[str]
+    adjusted_at: Optional[str]
+    adjusted_by: Optional[str]
+    adjustment_reason: Optional[str]
+
+
+class RuleHitInChain(BaseModel):
+    """Rule hit in evidence chain"""
+
+    id: str
+    rule_id: str
+    rule_name: str
+    matched_text: str
+    meta: Dict[str, Any]
+
+
+class KBCitationInChain(BaseModel):
+    """KB citation in evidence chain"""
+
+    id: str
+    chunk_id: Optional[str]
+    score: float
+    quote_text: str
+    doc_version: int
+    chunk: Optional[Dict[str, Any]] = None
+    document: Optional[Dict[str, Any]] = None
+
+
+class EvidenceInChain(BaseModel):
+    """Evidence in evidence chain"""
+
+    id: str
+    source_type: str
+    quote_text: str
+    start_offset: Optional[int]
+    end_offset: Optional[int]
+    page_ref: Optional[str]
+    chunk_id: Optional[str]
+
+
+class ClauseInChain(BaseModel):
+    """Clause in evidence chain"""
+
+    id: str
+    clause_id: str
+    title: Optional[str]
+    text: str
+    page_ref: Optional[str]
+    order_no: int
+
+
+class EvidenceChainResponse(BaseModel):
+    """Complete evidence chain response"""
+
+    risk_id: str
+    task_id: str
+    risk_summary: str
+    risk_level: str
+    original_risk_level: Optional[str]
+    risk_type: str
+    confidence: float
+    status: str
+    clause: Optional[ClauseInChain]
+    rule_hits: List[RuleHitInChain]
+    kb_citations: List[KBCitationInChain]
+    evidences: List[EvidenceInChain]
+    suggestions: List[SuggestionResponse]
+    adjusted_at: Optional[str]
+    adjusted_by: Optional[str]
+    adjustment_reason: Optional[str]

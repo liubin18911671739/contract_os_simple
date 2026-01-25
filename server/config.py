@@ -12,9 +12,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings"""
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     # ZhipuAI
     zhipu_api_key: Optional[str] = None  # Make optional for testing

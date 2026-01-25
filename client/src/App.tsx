@@ -6,6 +6,7 @@ import NewTaskUpload from './pages/NewTaskUpload';
 import Processing from './pages/Processing';
 import Results from './pages/Results';
 import Review from './pages/Review';
+import SuggestionReview from './pages/SuggestionReview';
 import Evaluation from './pages/Evaluation';
 import Settings from './pages/Settings';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -26,6 +27,7 @@ function App() {
           <Route path="/processing/:taskId" element={<Processing />} />
           <Route path="/results/:taskId" element={<Results />} />
           <Route path="/review/:taskId" element={<Review />} />
+          <Route path="/suggestion-review/:taskId" element={<SuggestionReview />} />
           <Route path="/evaluation" element={<Evaluation />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
