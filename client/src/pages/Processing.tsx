@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { CheckCircle, Loader, Clock, AlertCircle, XCircle, Users, Search, Brain, Shield, X, Trash2 } from 'lucide-react';
-import { getTask, getTaskEvents, cancelTask, deleteTask } from '../api/tasks';
+import { CheckCircle, Loader, Clock, AlertCircle, XCircle, Users, Search, Brain, Shield, X, Trash2, RefreshCw } from 'lucide-react';
+import { getTask, getTaskEvents, cancelTask, deleteTask, retryTask } from '../api/tasks';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { ProgressBar } from '../components/ui/Progress';
@@ -71,6 +71,7 @@ export default function Processing() {
   const [polling, setPolling] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
@@ -91,6 +92,10 @@ export default function Processing() {
           if (taskData.status === 'COMPLETED' || taskData.status === 'DONE') {
             setTimeout(() => navigate(`/results/${taskId}`), 2000);
           }
+        }
+        // Re-enable polling if task was retried and is now QUEUED
+        if (taskData.status === 'QUEUED' && !polling) {
+          setPolling(true);
         }
       } catch (error) {
         console.error('Failed to load task:', error);
@@ -258,12 +263,35 @@ export default function Processing() {
     }
   };
 
+  const handleRetry = async () => {
+    if (!taskId) return;
+    if (!confirm('确定要重试此任务吗？之前的分析数据将被覆盖。')) return;
+
+    setRetrying(true);
+    try {
+      await retryTask(taskId);
+      // Refresh task status and re-enable polling
+      const updatedTask = await getTask(taskId);
+      setTask(updatedTask);
+      setPolling(true);
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || '重试任务失败';
+      alert(message);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const canCancel = () => {
     return !task.cancel_requested &&
            task.status !== 'COMPLETED' &&
            task.status !== 'DONE' &&
            task.status !== 'FAILED' &&
            task.status !== 'CANCELLED';
+  };
+
+  const canRetry = () => {
+    return task.status === 'FAILED' || task.status === 'CANCELLED';
   };
 
   return (
@@ -277,6 +305,17 @@ export default function Processing() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canRetry() && (
+            <Button
+              variant="primary"
+              onClick={handleRetry}
+              disabled={retrying}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${retrying ? 'animate-spin' : ''}`} />
+              {retrying ? '重试中...' : '重试任务'}
+            </Button>
+          )}
           {canCancel() && (
             <Button
               variant="danger"
@@ -355,12 +394,25 @@ export default function Processing() {
       {task.error_message && (
         <Card className="border-l-4 border-l-red-500 mb-8">
           <CardBody>
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-semibold text-red-900 mb-1">分析失败</h4>
-                <p className="text-sm text-red-700">{task.error_message}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-red-900 mb-1">分析失败</h4>
+                  <p className="text-sm text-red-700">{task.error_message}</p>
+                </div>
               </div>
+              {canRetry() && (
+                <Button
+                  variant="primary"
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-1 ${retrying ? 'animate-spin' : ''}`} />
+                  {retrying ? '重试中...' : '重试'}
+                </Button>
+              )}
             </div>
           </CardBody>
         </Card>
@@ -370,12 +422,25 @@ export default function Processing() {
       {task.status === 'CANCELLED' && (
         <Card className="border-l-4 border-l-gray-500 mb-8">
           <CardBody>
-            <div className="flex items-start gap-3">
-              <XCircle className="w-6 h-6 text-gray-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-1">任务已取消</h4>
-                <p className="text-sm text-gray-700">此任务已被用户取消</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <XCircle className="w-6 h-6 text-gray-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-1">任务已取消</h4>
+                  <p className="text-sm text-gray-700">此任务已被用户取消</p>
+                </div>
               </div>
+              {canRetry() && (
+                <Button
+                  variant="primary"
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-1 ${retrying ? 'animate-spin' : ''}`} />
+                  {retrying ? '重试中...' : '重试'}
+                </Button>
+              )}
             </div>
           </CardBody>
         </Card>

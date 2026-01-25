@@ -31,7 +31,7 @@ export default function UISettings() {
     try {
       // Settings are already updated via the individual handlers
       setMessage({ type: 'success', text: '界面设置已保存' });
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: '保存失败，请重试' });
     } finally {
       setLoading(false);

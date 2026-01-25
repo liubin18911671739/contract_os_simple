@@ -107,7 +107,7 @@ export default function SystemSettings() {
       });
 
       setMessage({ type: 'success', text: '系统配置已保存' });
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: '保存失败，请重试' });
     } finally {
       setLoading(false);

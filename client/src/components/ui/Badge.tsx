@@ -1,9 +1,10 @@
 interface BadgeProps {
   children: React.ReactNode;
   color?: 'red' | 'amber' | 'emerald' | 'blue' | 'gray';
+  className?: string;
 }
 
-export function Badge({ children, color = 'gray' }: BadgeProps) {
+export function Badge({ children, color = 'gray', className = '' }: BadgeProps) {
   const colors = {
     red: 'bg-red-100 text-red-800',
     amber: 'bg-amber-100 text-amber-800',
@@ -14,7 +15,7 @@ export function Badge({ children, color = 'gray' }: BadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[color]}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[color]} ${className}`}
     >
       {children}
     </span>

@@ -66,7 +66,7 @@ export default function AccountSettings() {
       });
       setMessage({ type: 'success', text: '个人资料已保存' });
       setTimeout(() => setMessage(null), 3000);
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: '保存失败，请重试' });
     } finally {
       setLoading(false);

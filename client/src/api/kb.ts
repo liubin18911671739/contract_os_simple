@@ -1,7 +1,7 @@
 /**
  * Knowledge Base API
  */
-import { get, post, uploadFile } from './http';
+import { get, post, del, uploadFile } from './http';
 
 export interface KBCollection {
   id: string;
@@ -9,6 +9,9 @@ export interface KBCollection {
   scope: 'GLOBAL' | 'TENANT' | 'PROJECT' | 'DEPT';
   version: number;
   is_enabled: boolean;
+  document_count?: number;
+  chunk_count?: number;
+  indexed_count?: number;
   created_at: string;
 }
 
@@ -17,6 +20,9 @@ export interface KBDocument {
   collection_id: string;
   title: string;
   doc_type: string;
+  chunk_count: number;
+  indexed_count: number;
+  status: 'pending' | 'chunking' | 'indexing' | 'ready' | 'failed';
   created_at: string;
 }
 
@@ -26,6 +32,33 @@ export interface KBSearchResult {
   score: number;
   doc_title: string;
   doc_version: number;
+  doc_id?: string;
+  collection_id?: string;
+}
+
+export interface KBChunk {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  text: string;
+  is_indexed: boolean;
+  created_at: string;
+}
+
+export interface KBCollectionStats {
+  id: string;
+  name: string;
+  document_count: number;
+  chunk_count: number;
+  indexed_count: number;
+  avg_chunk_size: number;
+  total_storage_mb: number;
+}
+
+export interface KBSearchParams {
+  query: string;
+  collection_ids?: string[];
+  top_k?: number;
 }
 
 export async function createKBCollection(data: {
@@ -37,6 +70,14 @@ export async function createKBCollection(data: {
 
 export async function getKBCollections(): Promise<KBCollection[]> {
   return get('/kb/collections');
+}
+
+export async function deleteKBCollection(collectionId: string): Promise<void> {
+  return del(`/kb/collections/${collectionId}`);
+}
+
+export async function getKBCollectionStats(collectionId: string): Promise<KBCollectionStats> {
+  return get(`/kb/collections/${collectionId}/stats`);
 }
 
 export async function uploadKBDocument(
@@ -56,15 +97,18 @@ export async function getKBDocuments(collectionId?: string): Promise<KBDocument[
   return get(`/kb/documents${query}`);
 }
 
-export async function searchKB(data: {
-  query: string;
-  collection_ids?: string[];
-  top_k?: number;
-  task_id?: string;
-}): Promise<KBSearchResult[]> {
-  return post('/kb/search', data);
+export async function deleteKBDocument(docId: string): Promise<void> {
+  return del(`/kb/documents/${docId}`);
 }
 
-export async function getKBChunk(chunkId: string) {
+export async function getKBDocumentChunks(docId: string): Promise<KBChunk[]> {
+  return get(`/kb/documents/${docId}/chunks`);
+}
+
+export async function getKBChunk(chunkId: string): Promise<KBChunk> {
   return get(`/kb/chunks/${chunkId}`);
+}
+
+export async function searchKB(params: KBSearchParams): Promise<KBSearchResult[]> {
+  return post('/kb/search', params);
 }

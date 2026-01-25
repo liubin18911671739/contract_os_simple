@@ -10,7 +10,7 @@ interface LifecycleLogOptions {
   logMount?: boolean;
   logUnmount?: boolean;
   logUpdate?: boolean;
-  customData?: any;
+  customData?: unknown;
 }
 
 export function useLifecycleLog(
@@ -18,7 +18,6 @@ export function useLifecycleLog(
   options: LifecycleLogOptions = {}
 ) {
   const {
-    logProps = true,
     logMount = true,
     logUnmount = true,
     logUpdate = false,
@@ -27,7 +26,7 @@ export function useLifecycleLog(
 
   const mountTime = useRef<number>(performance.now());
   const renderCount = useRef<number>(0);
-  const previousProps = useRef<any>(undefined);
+  const previousProps = useRef<Record<string, unknown>>({});
 
   useEffect(() => {
     renderCount.current++;
@@ -36,13 +35,13 @@ export function useLifecycleLog(
       log.componentMount(componentName, customData);
     } else if (logUpdate) {
       // Check what changed
-      const changes: Record<string, { from: any; to: any }> = {};
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
       if (previousProps.current && customData) {
         Object.keys(customData).forEach(key => {
-          if (previousProps.current[key] !== customData[key]) {
+          if ((previousProps.current as Record<string, unknown>)[key] !== (customData as Record<string, unknown>)[key]) {
             changes[key] = {
-              from: previousProps.current[key],
-              to: customData[key],
+              from: (previousProps.current as Record<string, unknown>)[key],
+              to: (customData as Record<string, unknown>)[key],
             };
           }
         });
@@ -60,7 +59,7 @@ export function useLifecycleLog(
       }
     }
 
-    previousProps.current = customData;
+    previousProps.current = (customData as Record<string, unknown>) || {};
 
     return () => {
       if (logUnmount) {
@@ -86,16 +85,17 @@ export function useAsyncLog(operationName: string) {
     return performance.now();
   };
 
-  const endTiming = (startTime: number, result?: any) => {
+  const endTiming = (startTime: number, result?: unknown) => {
     const duration = performance.now() - startTime;
     log.performance(operationName, duration, 'ms');
     return result;
   };
 
-  const logError = (error: any) => {
+  const logError = (error: unknown) => {
+    const err = error instanceof Error ? error : new Error(String(error));
     log.error(`Error in ${operationName}`, {
-      error: error.message || error,
-      stack: error.stack,
+      error: err.message || error,
+      stack: err.stack,
     });
   };
 

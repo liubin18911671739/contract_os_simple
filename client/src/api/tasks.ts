@@ -77,3 +77,7 @@ export async function getTaskReports(taskId: string) {
 export async function deleteTask(taskId: string, force?: boolean): Promise<{ success: boolean }> {
   return del(`/precheck-tasks/${taskId}${force ? '?force=true' : ''}`);
 }
+
+export async function retryTask(taskId: string): Promise<{ success: boolean }> {
+  return post(`/precheck-tasks/${taskId}/retry`);
+}

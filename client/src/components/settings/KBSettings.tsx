@@ -98,7 +98,7 @@ export default function KBSettings() {
       });
 
       setMessage({ type: 'success', text: '知识库配置已保存' });
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: '保存失败，请重试' });
     } finally {
       setLoading(false);
